@@ -30,6 +30,8 @@ class TaskManager:
         self._async_tasks: dict[str, asyncio.Task] = {}
         self.image_builder = ImageBuilder()
         self._lock = asyncio.Lock()
+        self._image_refs: dict[str, int] = {}
+        self._refs_lock = asyncio.Lock()
 
         # Restore tasks from DB
         self._restore_tasks()
@@ -104,10 +106,51 @@ class TaskManager:
 
         return task
 
+    @staticmethod
+    def _get_task_images(task: BuildTask) -> set[str]:
+        """Return the set of base images and deps_image used by a task."""
+        images = set(task.base_images)
+        if task.deps_image:
+            images.add(task.deps_image)
+        return images
+
+    async def _register_task_images(self, task: BuildTask) -> None:
+        """Increment reference count for each image used by the task."""
+        async with self._refs_lock:
+            for image in self._get_task_images(task):
+                self._image_refs[image] = self._image_refs.get(image, 0) + 1
+
+    async def _unregister_task_images(self, task: BuildTask) -> list[str]:
+        """Decrement reference count; return images whose count reached zero."""
+        to_remove: list[str] = []
+        async with self._refs_lock:
+            for image in self._get_task_images(task):
+                count = self._image_refs.get(image, 0) - 1
+                if count <= 0:
+                    self._image_refs.pop(image, None)
+                    to_remove.append(image)
+                else:
+                    self._image_refs[image] = count
+        return to_remove
+
+    async def _cleanup_task_images(self, task: BuildTask) -> None:
+        """Unregister task images and remove those no longer referenced."""
+        to_remove = await self._unregister_task_images(task)
+        for image in to_remove:
+            try:
+                await DockerService.remove_image(image)
+            except Exception as e:
+                logger.debug(f"Failed to remove image {image}: {e}")
+        try:
+            await DockerService.prune_images()
+        except Exception as e:
+            logger.debug(f"Failed to prune images: {e}")
+
     async def _execute_task(self, task: BuildTask) -> None:
         """Execute all image builds with configurable concurrency."""
         task.status = TaskStatus.RUNNING
         self._save(task)
+        await self._register_task_images(task)
         shared_build_dir = None
 
         try:
@@ -174,6 +217,11 @@ class TaskManager:
                 shutil.rmtree(shared_build_dir, ignore_errors=True)
             # Remove asyncio task reference
             self._async_tasks.pop(task.task_id, None)
+            # Unregister images and remove unreferenced ones
+            try:
+                await self._cleanup_task_images(task)
+            except Exception as e:
+                logger.warning(f"Image cleanup failed: {e}")
 
         # Determine final task status
         task.finished_at = datetime.now()
@@ -191,12 +239,6 @@ class TaskManager:
             f"Task [{task.task_name}] finished: {task.status.value} "
             f"({task.completed_images}/{task.total_images} succeeded)"
         )
-
-        # Prune dangling Docker images after task completes
-        try:
-            await DockerService.prune_images()
-        except Exception as e:
-            logger.warning(f"Failed to prune Docker images: {e}")
 
     def get_task(self, task_id: str) -> BuildTask | None:
         return self.tasks.get(task_id)

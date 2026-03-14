@@ -1,5 +1,6 @@
 from backend.builder.image_builder import _compute_target_image
 from backend.core.database import init_db, save_task
+from backend.core.docker_service import DockerService
 from backend.core.task_models import (
     BuildTask,
     ImageBuildInfo,
@@ -216,3 +217,147 @@ class TestTaskRestore:
         restored = manager2.get_task(task.task_id)
         assert restored is not None
         assert restored.task_name == "persist-test"
+
+
+class TestImageRefCounting:
+    def test_get_task_images(self):
+        """_get_task_images deduplicates and includes deps_image."""
+        task = BuildTask(
+            task_name="t",
+            deps_image="deps:v1",
+            push_dir="reg/repo",
+            base_images=["ubuntu:22.04", "ubuntu:22.04", "alpine:3"],
+        )
+        result = TaskManager._get_task_images(task)
+        assert result == {"ubuntu:22.04", "alpine:3", "deps:v1"}
+
+    def test_get_task_images_empty_deps(self):
+        """Empty deps_image is excluded from the set."""
+        task = BuildTask(
+            task_name="t",
+            deps_image="",
+            push_dir="reg/repo",
+            base_images=["ubuntu:22.04"],
+        )
+        result = TaskManager._get_task_images(task)
+        assert result == {"ubuntu:22.04"}
+
+    def test_get_task_images_deps_same_as_base(self):
+        """deps_image that matches a base_image is deduplicated."""
+        task = BuildTask(
+            task_name="t",
+            deps_image="ubuntu:22.04",
+            push_dir="reg/repo",
+            base_images=["ubuntu:22.04"],
+        )
+        result = TaskManager._get_task_images(task)
+        assert result == {"ubuntu:22.04"}
+
+    @pytest.mark.asyncio
+    async def test_register_and_unregister(self, db_path):
+        """Single task register/unregister lifecycle."""
+        manager = _make_manager(db_path)
+        task = BuildTask(
+            task_name="t",
+            deps_image="deps:v1",
+            push_dir="reg/repo",
+            base_images=["ubuntu:22.04"],
+        )
+
+        await manager._register_task_images(task)
+        assert manager._image_refs == {"ubuntu:22.04": 1, "deps:v1": 1}
+
+        removed = await manager._unregister_task_images(task)
+        assert set(removed) == {"ubuntu:22.04", "deps:v1"}
+        assert manager._image_refs == {}
+
+    @pytest.mark.asyncio
+    async def test_shared_image_not_removed_while_referenced(self, db_path):
+        """Shared base image is only returned for removal when last reference drops."""
+        manager = _make_manager(db_path)
+        task1 = BuildTask(
+            task_name="t1",
+            deps_image="deps:v1",
+            push_dir="reg/repo",
+            base_images=["ubuntu:22.04"],
+        )
+        task2 = BuildTask(
+            task_name="t2",
+            deps_image="deps:v1",
+            push_dir="reg/repo",
+            base_images=["ubuntu:22.04", "alpine:3"],
+        )
+
+        await manager._register_task_images(task1)
+        await manager._register_task_images(task2)
+        assert manager._image_refs["ubuntu:22.04"] == 2
+        assert manager._image_refs["deps:v1"] == 2
+        assert manager._image_refs["alpine:3"] == 1
+
+        # First unregister: shared images stay, alpine:3 not in task1
+        removed1 = await manager._unregister_task_images(task1)
+        assert "ubuntu:22.04" not in removed1
+        assert "deps:v1" not in removed1
+        assert manager._image_refs["ubuntu:22.04"] == 1
+        assert manager._image_refs["deps:v1"] == 1
+
+        # Second unregister: all drop to zero
+        removed2 = await manager._unregister_task_images(task2)
+        assert set(removed2) == {"ubuntu:22.04", "deps:v1", "alpine:3"}
+        assert manager._image_refs == {}
+
+    @pytest.mark.asyncio
+    async def test_cleanup_calls_remove_and_prune(self, db_path):
+        """_cleanup_task_images calls remove_image for each unreferenced image and prune."""
+        manager = _make_manager(db_path)
+        task = BuildTask(
+            task_name="t",
+            deps_image="deps:v1",
+            push_dir="reg/repo",
+            base_images=["ubuntu:22.04"],
+        )
+
+        await manager._register_task_images(task)
+
+        with patch.object(DockerService, "remove_image", new_callable=AsyncMock) as mock_remove, \
+             patch.object(DockerService, "prune_images", new_callable=AsyncMock) as mock_prune:
+            await manager._cleanup_task_images(task)
+
+            removed_images = {call.args[0] for call in mock_remove.call_args_list}
+            assert removed_images == {"ubuntu:22.04", "deps:v1"}
+            mock_prune.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_cancelled_task_cleans_up(self, db_path):
+        """Cancelled task still goes through image cleanup in finally block."""
+        manager = _make_manager(db_path)
+
+        async def slow_build(*args, **kwargs):
+            await asyncio.sleep(3600)
+
+        with patch("backend.core.task_manager.prep_shared_build_context", return_value="/tmp/fake"), \
+             patch.object(manager.image_builder, "build_image", side_effect=slow_build), \
+             patch.object(DockerService, "remove_image", new_callable=AsyncMock) as mock_remove, \
+             patch.object(DockerService, "prune_images", new_callable=AsyncMock) as mock_prune:
+            task = await manager.create_task(
+                task_name="cancel-cleanup-test",
+                deps_image="deps:v1",
+                base_images=["ubuntu:22.04"],
+                push_dir="reg/repo",
+            )
+            await asyncio.sleep(0.1)
+            assert task.status == TaskStatus.RUNNING
+            # Images should be registered
+            assert manager._image_refs.get("ubuntu:22.04", 0) >= 1
+
+            # Cancel the task
+            success, _ = await manager.stop_task(task.task_id)
+            assert success is True
+            await asyncio.sleep(0.1)
+
+            assert task.status == TaskStatus.CANCELLED
+            # Refs should be cleaned up
+            assert manager._image_refs.get("ubuntu:22.04", 0) == 0
+            # remove_image and prune should have been called
+            mock_remove.assert_called()
+            mock_prune.assert_called()
