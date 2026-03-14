@@ -33,8 +33,7 @@ class CreateTaskRequest(BaseModel):
     push_dir: str
     build_args: list[str] = []
     retry_count: int = 0
-    concurrency: int = 1
-    source_dir: str | None = None
+    concurrency: int = 2
 
 
 class StageDetail(BaseModel):
@@ -75,7 +74,6 @@ class TaskDetail(BaseModel):
     build_args: list[str]
     retry_count: int
     concurrency: int
-    source_dir: str
     created_at: str
     finished_at: str | None = None
     elapsed_seconds: float | None = None

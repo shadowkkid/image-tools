@@ -36,7 +36,6 @@ export interface CreateTaskParams {
   build_args?: string[];
   retry_count?: number;
   concurrency?: number;
-  source_dir?: string;
 }
 
 export async function createTask(params: CreateTaskParams): Promise<TaskSummary> {

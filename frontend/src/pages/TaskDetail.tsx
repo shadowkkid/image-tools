@@ -122,7 +122,6 @@ export default function TaskDetail() {
       build_args: task.build_args.join('\n'),
       retry_count: task.retry_count,
       concurrency: task.concurrency,
-      source_dir: task.source_dir,
     };
     navigate('/create', { state: cloneData });
   };
@@ -235,9 +234,6 @@ export default function TaskDetail() {
           </Descriptions.Item>
           <Descriptions.Item label="推送目标" span={2}>
             <code>{task.push_dir}</code>
-          </Descriptions.Item>
-          <Descriptions.Item label="源码目录" span={2}>
-            <code>{task.source_dir}</code>
           </Descriptions.Item>
           {task.build_args.length > 0 && (
             <Descriptions.Item label="Build 参数" span={2}>

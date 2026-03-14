@@ -74,7 +74,6 @@ export default function TaskCreate() {
       build_args: buildArgs,
       retry_count: (values.retry_count as number) ?? 0,
       concurrency: (values.concurrency as number) ?? 1,
-      source_dir: (values.source_dir as string) || undefined,
     });
 
     message.success(`任务 "${res.task_name}" 已创建`);
@@ -101,7 +100,7 @@ export default function TaskCreate() {
         <Form
           form={form}
           layout="vertical"
-          initialValues={{ retry_count: 0, concurrency: 1 }}
+          initialValues={{ retry_count: 0, concurrency: 2 }}
         >
           <Form.Item
             label="任务名称"
@@ -157,14 +156,6 @@ export default function TaskCreate() {
             extra="同时构建的镜像数量，建议 1-4"
           >
             <InputNumber min={1} max={10} style={{ width: 120 }} />
-          </Form.Item>
-
-          <Form.Item
-            label="OpenHands 源码目录"
-            name="source_dir"
-            extra="留空则使用默认路径"
-          >
-            <Input placeholder="/home/SENSETIME/lizimu/workspace/python/OpenHands_Ss" />
           </Form.Item>
 
           <Form.Item>

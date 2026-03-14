@@ -23,7 +23,6 @@ async def create_task(req: CreateTaskRequest):
         build_args=req.build_args,
         retry_count=req.retry_count,
         concurrency=req.concurrency,
-        source_dir=req.source_dir,
     )
     return _to_summary(task)
 
@@ -51,7 +50,6 @@ async def get_task(task_id: str):
         build_args=task.build_args,
         retry_count=task.retry_count,
         concurrency=task.concurrency,
-        source_dir=task.source_dir,
         created_at=task.created_at.isoformat(),
         finished_at=task.finished_at.isoformat() if task.finished_at else None,
         elapsed_seconds=task.elapsed_seconds,

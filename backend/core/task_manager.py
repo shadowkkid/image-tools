@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import os
 import shutil
 from datetime import datetime
 
@@ -19,8 +20,11 @@ from backend.core.task_models import (
 
 logger = logging.getLogger(__name__)
 
-# Default OpenHands source directory
-DEFAULT_SOURCE_DIR = "/home/SENSETIME/lizimu/workspace/python/OpenHands_Ss"
+# Default OpenHands source directory (configurable via environment variable)
+DEFAULT_SOURCE_DIR = os.environ.get(
+    "IMAGE_TOOLS_SOURCE_DIR",
+    "/home/SENSETIME/lizimu/workspace/python/OpenHands_Ss",
+)
 
 
 class TaskManager:
@@ -69,8 +73,7 @@ class TaskManager:
         push_dir: str,
         build_args: list[str] | None = None,
         retry_count: int = 0,
-        source_dir: str | None = None,
-        concurrency: int = 1,
+        concurrency: int = 2,
     ) -> BuildTask:
         """Create a new build task and start execution in background."""
         task = BuildTask(
@@ -80,7 +83,7 @@ class TaskManager:
             base_images=base_images,
             build_args=build_args or [],
             retry_count=retry_count,
-            source_dir=source_dir or DEFAULT_SOURCE_DIR,
+            source_dir=DEFAULT_SOURCE_DIR,
             concurrency=max(1, concurrency),
         )
 
