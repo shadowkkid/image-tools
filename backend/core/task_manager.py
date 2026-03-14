@@ -6,6 +6,7 @@ from datetime import datetime
 
 from backend.builder.image_builder import (
     ImageBuilder,
+    _compute_build_image_tag,
     _compute_target_image,
     prep_shared_build_context,
 )
@@ -150,6 +151,25 @@ class TaskManager:
         except Exception as e:
             logger.debug(f"Failed to prune images: {e}")
 
+    async def _cleanup_build_images(self, task: BuildTask) -> None:
+        """Remove build tags and target tags for all images in a cancelled task."""
+        for img in task.images:
+            build_tag = _compute_build_image_tag(task.push_dir, img.base_image)
+            try:
+                await DockerService.remove_image(build_tag)
+            except Exception as e:
+                logger.debug(f"Failed to remove build tag {build_tag}: {e}")
+            # Only remove target tag if it wasn't pushed
+            if img.status != ImageBuildStatus.SUCCESS:
+                try:
+                    await DockerService.remove_image(img.target_image)
+                except Exception as e:
+                    logger.debug(f"Failed to remove target tag {img.target_image}: {e}")
+        try:
+            await DockerService.prune_images()
+        except Exception as e:
+            logger.debug(f"Failed to prune images: {e}")
+
     async def _execute_task(self, task: BuildTask) -> None:
         """Execute all image builds with configurable concurrency."""
         task.status = TaskStatus.RUNNING
@@ -208,6 +228,14 @@ class TaskManager:
                     img.status = ImageBuildStatus.CANCELLED
             task.finished_at = datetime.now()
             self._save(task)
+            # Clean up build/target images that may have been created
+            # Use shield to prevent this cleanup from being cancelled
+            try:
+                await asyncio.shield(self._cleanup_build_images(task))
+            except asyncio.CancelledError:
+                pass
+            except Exception as e:
+                logger.warning(f"Build image cleanup on cancel failed: {e}")
             return
         except Exception as e:
             logger.error(f"Task [{task.task_name}] failed to prepare build context: {e}")
