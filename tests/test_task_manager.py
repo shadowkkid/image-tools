@@ -39,14 +39,14 @@ class TestComputeTargetImage:
             "registry.sensecore.tech/ccr-sandbox-swe",
             "nikolaik/python-nodejs:python3.12-nodejs22"
         )
-        assert result == "registry.sensecore.tech/ccr-sandbox-swe/nikolaik_python-nodejs:python3.12-nodejs22"
+        assert result == "registry.sensecore.tech/ccr-sandbox-swe/nikolaik/python-nodejs:python3.12-nodejs22"
 
     def test_strip_registry_prefix(self):
         result = _compute_target_image(
             "registry.sensecore.tech/ccr-sandbox-swe",
             "docker.io/library/ubuntu:22.04"
         )
-        assert result == "registry.sensecore.tech/ccr-sandbox-swe/library_ubuntu:22.04"
+        assert result == "registry.sensecore.tech/ccr-sandbox-swe/library/ubuntu:22.04"
 
     def test_no_tag(self):
         result = _compute_target_image("registry.sensecore.tech/repo", "ubuntu")

@@ -25,7 +25,7 @@ def _compute_target_image(push_dir: str, base_image: str) -> str:
     -> 'registry.sensecore.tech/ccr-sandbox-swe/ubuntu:22.04'
 
     If base_image has a registry prefix (contains dots in first segment), strip it.
-    If base_image path has multiple segments, join with '_'.
+    Preserves original path structure (multi-segment paths kept as-is).
     """
     push_dir = push_dir.rstrip("/")
 
@@ -41,17 +41,27 @@ def _compute_target_image(push_dir: str, base_image: str) -> str:
     if len(parts) > 1 and ("." in parts[0] or ":" in parts[0]):
         parts = parts[1:]
 
-    # Join remaining path segments with '_' to create a flat name
-    image_name = "_".join(parts) if len(parts) > 1 else parts[0]
+    # Preserve original path structure
+    image_name = "/".join(parts)
 
     return f"{push_dir}/{image_name}:{tag}"
 
 
 def _compute_build_image_tag(push_dir: str, base_image: str) -> str:
-    """Compute a local build tag for the image (used during docker build, before final tag)."""
+    """Compute a local build tag for the image (used during docker build, before final tag).
+
+    Flattens multi-segment paths with '_' for a valid single-segment local tag.
+    """
     target = _compute_target_image(push_dir, base_image)
-    # Use a temp tag prefix to avoid conflicts
-    return f"image-tools-build/{target.split('/')[-1]}"
+    # Extract everything after push_dir prefix: e.g. "swebench/sweb...:latest"
+    # Use the last part after the registry/repo prefix, flatten '/' to '_'
+    _, _, rest = target.partition(push_dir.rstrip("/") + "/")
+    if "/" in rest.rsplit(":", 1)[0]:
+        # Multi-segment: flatten for local tag
+        image_part, tag = rest.rsplit(":", 1)
+        flat_name = image_part.replace("/", "_")
+        return f"image-tools-build/{flat_name}:{tag}"
+    return f"image-tools-build/{rest}"
 
 
 def prep_shared_build_context(source_dir: str) -> str:
