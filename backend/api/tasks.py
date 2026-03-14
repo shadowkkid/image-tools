@@ -62,6 +62,14 @@ async def get_task(task_id: str):
     )
 
 
+@router.post("/{task_id}/stop")
+async def stop_task(task_id: str):
+    success, message = await task_manager.stop_task(task_id)
+    if not success:
+        raise HTTPException(status_code=400, detail=message)
+    return {"success": True, "message": message}
+
+
 def _to_summary(task) -> TaskSummary:
     return TaskSummary(
         task_id=task.task_id,

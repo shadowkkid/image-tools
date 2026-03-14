@@ -10,6 +10,7 @@ class TaskStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     PARTIAL_FAILED = "partial_failed"
+    CANCELLED = "cancelled"
 
 
 class ImageBuildStatus(str, Enum):
@@ -17,6 +18,7 @@ class ImageBuildStatus(str, Enum):
     BUILDING = "building"
     SUCCESS = "success"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class StageStatus(str, Enum):

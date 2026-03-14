@@ -11,6 +11,7 @@ from backend.builder.image_builder import (
 from backend.core.task_models import (
     BuildTask,
     ImageBuildInfo,
+    ImageBuildStatus,
     TaskStatus,
 )
 
@@ -23,6 +24,7 @@ DEFAULT_SOURCE_DIR = "/home/SENSETIME/lizimu/workspace/python/OpenHands_Ss"
 class TaskManager:
     def __init__(self):
         self.tasks: dict[str, BuildTask] = {}
+        self._async_tasks: dict[str, asyncio.Task] = {}
         self.image_builder = ImageBuilder()
         self._lock = asyncio.Lock()
 
@@ -63,7 +65,8 @@ class TaskManager:
             self.tasks[task.task_id] = task
 
         # Start background execution
-        asyncio.create_task(self._execute_task(task))
+        bg_task = asyncio.create_task(self._execute_task(task))
+        self._async_tasks[task.task_id] = bg_task
 
         return task
 
@@ -110,6 +113,15 @@ class TaskManager:
                     *(build_with_limit(img) for img in task.images)
                 )
 
+        except asyncio.CancelledError:
+            logger.info(f"Task [{task.task_name}] was cancelled")
+            task.status = TaskStatus.CANCELLED
+            # Mark pending/building images as cancelled
+            for img in task.images:
+                if img.status in (ImageBuildStatus.PENDING, ImageBuildStatus.BUILDING):
+                    img.status = ImageBuildStatus.CANCELLED
+            task.finished_at = datetime.now()
+            return
         except Exception as e:
             logger.error(f"Task [{task.task_name}] failed to prepare build context: {e}")
             task.status = TaskStatus.FAILED
@@ -119,6 +131,8 @@ class TaskManager:
             # Clean up shared build context
             if shared_build_dir:
                 shutil.rmtree(shared_build_dir, ignore_errors=True)
+            # Remove asyncio task reference
+            self._async_tasks.pop(task.task_id, None)
 
         # Determine final task status
         task.finished_at = datetime.now()
@@ -140,6 +154,21 @@ class TaskManager:
 
     def list_tasks(self) -> list[BuildTask]:
         return list(self.tasks.values())
+
+    async def stop_task(self, task_id: str) -> tuple[bool, str]:
+        """Stop a running task by cancelling its asyncio task."""
+        task = self.tasks.get(task_id)
+        if not task:
+            return False, "任务不存在"
+        if task.status != TaskStatus.RUNNING:
+            return False, f"任务当前状态为 {task.status.value}，无法停止"
+
+        bg_task = self._async_tasks.get(task_id)
+        if bg_task and not bg_task.done():
+            bg_task.cancel()
+            return True, "任务正在停止"
+
+        return False, "未找到运行中的后台任务"
 
 
 # Global instance

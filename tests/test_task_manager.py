@@ -7,6 +7,11 @@ from backend.core.task_models import (
     TaskStatus,
 )
 
+import asyncio
+import pytest
+from unittest.mock import AsyncMock, patch
+from backend.core.task_manager import TaskManager
+
 
 class TestComputeTargetImage:
     def test_simple(self):
@@ -57,3 +62,61 @@ class TestTaskModels:
         assert img.current_stage is None
         img.stages[1].status = StageStatus.RUNNING
         assert img.current_stage == "docker_build"
+
+
+class TestStopTask:
+    @pytest.mark.asyncio
+    async def test_stop_running_task(self):
+        manager = TaskManager()
+
+        # Mock prep_shared_build_context and build_image to block forever
+        async def slow_build(*args, **kwargs):
+            await asyncio.sleep(3600)
+
+        with patch("backend.core.task_manager.prep_shared_build_context", return_value="/tmp/fake"):
+            with patch.object(manager.image_builder, "build_image", side_effect=slow_build):
+                task = await manager.create_task(
+                    task_name="stop-test",
+                    deps_image="deps:latest",
+                    base_images=["ubuntu:22.04"],
+                    push_dir="reg/repo",
+                )
+                # Let the task start running
+                await asyncio.sleep(0.1)
+                assert task.status == TaskStatus.RUNNING
+
+                # Stop it
+                success, msg = await manager.stop_task(task.task_id)
+                assert success is True
+
+                # Wait for cancellation to propagate
+                await asyncio.sleep(0.1)
+                assert task.status == TaskStatus.CANCELLED
+
+    @pytest.mark.asyncio
+    async def test_stop_nonexistent_task(self):
+        manager = TaskManager()
+        success, msg = await manager.stop_task("nonexistent")
+        assert success is False
+        assert "不存在" in msg
+
+    @pytest.mark.asyncio
+    async def test_stop_completed_task(self):
+        manager = TaskManager()
+
+        with patch("backend.core.task_manager.prep_shared_build_context", return_value="/tmp/fake"):
+            with patch("backend.core.task_manager.ImageBuilder") as MockBuilder:
+                instance = MockBuilder.return_value
+                instance.build_image = AsyncMock()
+
+                task = await manager.create_task(
+                    task_name="done-test",
+                    deps_image="deps:latest",
+                    base_images=["ubuntu:22.04"],
+                    push_dir="reg/repo",
+                )
+                # Wait for task to finish
+                await asyncio.sleep(0.2)
+
+                success, msg = await manager.stop_task(task.task_id)
+                assert success is False

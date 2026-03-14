@@ -53,3 +53,8 @@ export async function getTask(taskId: string): Promise<TaskDetailData> {
   const { data } = await api.get(`/tasks/${taskId}`);
   return data;
 }
+
+export async function stopTask(taskId: string): Promise<{ success: boolean; message: string }> {
+  const { data } = await api.post(`/tasks/${taskId}/stop`);
+  return data;
+}

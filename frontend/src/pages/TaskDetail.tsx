@@ -10,9 +10,11 @@ import {
   Alert,
   Space,
   Spin,
+  Modal,
+  message,
 } from 'antd';
-import { ArrowLeftOutlined, ReloadOutlined } from '@ant-design/icons';
-import { getTask } from '../api/client';
+import { ArrowLeftOutlined, ReloadOutlined, StopOutlined, CopyOutlined } from '@ant-design/icons';
+import { getTask, stopTask } from '../api/client';
 import type { TaskDetailData, ImageDetail, StageDetail } from '../types';
 
 const statusColorMap: Record<string, string> = {
@@ -23,6 +25,7 @@ const statusColorMap: Record<string, string> = {
   success: 'success',
   failed: 'error',
   partial_failed: 'warning',
+  cancelled: 'warning',
 };
 
 const statusLabelMap: Record<string, string> = {
@@ -33,6 +36,7 @@ const statusLabelMap: Record<string, string> = {
   success: '成功',
   failed: '失败',
   partial_failed: '部分失败',
+  cancelled: '已取消',
 };
 
 const stageLabelMap: Record<string, string> = {
@@ -89,6 +93,39 @@ export default function TaskDetail() {
   }
 
   const isRunning = task.status === 'running';
+
+  const handleStop = () => {
+    Modal.confirm({
+      title: '确认停止任务',
+      content: '停止后正在运行的构建将被取消，已完成的镜像不受影响。',
+      okText: '停止',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await stopTask(taskId!);
+          message.success('任务已停止');
+          fetchTask();
+        } catch {
+          message.error('停止任务失败');
+        }
+      },
+    });
+  };
+
+  const handleClone = () => {
+    const cloneData = {
+      task_name: `${task.task_name}-copy`,
+      deps_image: task.deps_image,
+      push_dir: task.push_dir,
+      base_images: task.images.map((img) => img.base_image).join('\n'),
+      build_args: task.build_args.join('\n'),
+      retry_count: task.retry_count,
+      concurrency: task.concurrency,
+      source_dir: task.source_dir,
+    };
+    navigate('/create', { state: cloneData });
+  };
 
   const expandedRowRender = (record: ImageDetail) => (
     <div style={{ padding: '8px 0' }}>
@@ -175,6 +212,14 @@ export default function TaskDetail() {
         </Button>
         <Button icon={<ReloadOutlined />} onClick={fetchTask} loading={loading}>
           刷新
+        </Button>
+        {isRunning && (
+          <Button danger icon={<StopOutlined />} onClick={handleStop}>
+            停止任务
+          </Button>
+        )}
+        <Button icon={<CopyOutlined />} onClick={handleClone}>
+          复制任务
         </Button>
         {isRunning && <Tag color="processing">任务运行中，自动刷新</Tag>}
       </Space>

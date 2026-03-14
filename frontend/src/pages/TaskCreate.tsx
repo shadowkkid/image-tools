@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Card,
   Form,
@@ -16,10 +16,19 @@ const { TextArea } = Input;
 
 export default function TaskCreate() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [form] = Form.useForm();
   const [loading, setLoading] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
   const [loginRegistry, setLoginRegistry] = useState('');
+
+  // Pre-fill form from clone data (via location.state)
+  useEffect(() => {
+    const state = location.state as Record<string, unknown> | null;
+    if (state) {
+      form.setFieldsValue(state);
+    }
+  }, []);
 
   const handleSubmit = async () => {
     try {

@@ -11,6 +11,7 @@ const statusColorMap: Record<string, string> = {
   completed: 'success',
   failed: 'error',
   partial_failed: 'warning',
+  cancelled: 'warning',
 };
 
 const statusLabelMap: Record<string, string> = {
@@ -19,6 +20,7 @@ const statusLabelMap: Record<string, string> = {
   completed: '已完成',
   failed: '失败',
   partial_failed: '部分失败',
+  cancelled: '已取消',
 };
 
 export default function TaskList() {
