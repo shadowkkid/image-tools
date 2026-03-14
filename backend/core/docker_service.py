@@ -2,8 +2,25 @@ import asyncio
 import json
 import os
 import logging
+import signal
 
 logger = logging.getLogger(__name__)
+
+
+async def _kill_proc(proc: asyncio.subprocess.Process, label: str) -> None:
+    """Terminate a subprocess and wait for it to exit."""
+    if proc.returncode is not None:
+        return
+    logger.info(f"Killing {label} subprocess (pid={proc.pid})")
+    try:
+        proc.send_signal(signal.SIGTERM)
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=5)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+    except ProcessLookupError:
+        pass
 
 
 def _parse_registry_host(registry_with_prefix: str) -> str:
@@ -94,14 +111,18 @@ class DockerService:
         )
 
         output_lines = []
-        assert proc.stdout is not None
-        async for line in proc.stdout:
-            decoded = line.decode().rstrip()
-            if decoded:
-                output_lines.append(decoded)
-                logger.debug(decoded)
+        try:
+            assert proc.stdout is not None
+            async for line in proc.stdout:
+                decoded = line.decode().rstrip()
+                if decoded:
+                    output_lines.append(decoded)
+                    logger.debug(decoded)
 
-        await proc.wait()
+            await proc.wait()
+        except asyncio.CancelledError:
+            await _kill_proc(proc, "docker build")
+            raise
 
         output = "\n".join(output_lines)
         if proc.returncode == 0:
@@ -133,13 +154,17 @@ class DockerService:
         )
 
         output_lines = []
-        assert proc.stdout is not None
-        async for line in proc.stdout:
-            decoded = line.decode().rstrip()
-            if decoded:
-                output_lines.append(decoded)
+        try:
+            assert proc.stdout is not None
+            async for line in proc.stdout:
+                decoded = line.decode().rstrip()
+                if decoded:
+                    output_lines.append(decoded)
 
-        await proc.wait()
+            await proc.wait()
+        except asyncio.CancelledError:
+            await _kill_proc(proc, "docker push")
+            raise
 
         output = "\n".join(output_lines)
         if proc.returncode == 0:

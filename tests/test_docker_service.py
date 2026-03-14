@@ -1,7 +1,9 @@
+import asyncio
 import json
 import os
+import signal
 import tempfile
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -130,3 +132,68 @@ class TestDockerPruneImages:
         with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
             ok, msg = await DockerService.prune_images()
             assert ok is False
+
+
+class TestBuildCancellation:
+    @pytest.mark.asyncio
+    async def test_build_kills_subprocess_on_cancel(self):
+        """When the build coroutine is cancelled, the docker subprocess should be terminated."""
+        mock_proc = AsyncMock()
+        mock_proc.pid = 12345
+        mock_proc.returncode = None
+        mock_proc.send_signal = MagicMock()
+        mock_proc.kill = MagicMock()
+
+        # Simulate a long-running stdout stream that blocks forever
+        async def blocking_stdout():
+            yield b"#1 building...\n"
+            await asyncio.sleep(3600)  # will be cancelled
+
+        mock_proc.stdout = blocking_stdout()
+
+        # After SIGTERM, simulate process exiting
+        async def fake_wait():
+            mock_proc.returncode = -15
+
+        mock_proc.wait = fake_wait
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+            task = asyncio.create_task(
+                DockerService.build("/tmp/ctx", ["img:v1"])
+            )
+            # Let the build start reading stdout
+            await asyncio.sleep(0.05)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+        mock_proc.send_signal.assert_called_once_with(signal.SIGTERM)
+
+    @pytest.mark.asyncio
+    async def test_push_kills_subprocess_on_cancel(self):
+        """When the push coroutine is cancelled, the docker subprocess should be terminated."""
+        mock_proc = AsyncMock()
+        mock_proc.pid = 12346
+        mock_proc.returncode = None
+        mock_proc.send_signal = MagicMock()
+        mock_proc.kill = MagicMock()
+
+        async def blocking_stdout():
+            yield b"pushing layer...\n"
+            await asyncio.sleep(3600)
+
+        mock_proc.stdout = blocking_stdout()
+
+        async def fake_wait():
+            mock_proc.returncode = -15
+
+        mock_proc.wait = fake_wait
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+            task = asyncio.create_task(DockerService.push("img:v1"))
+            await asyncio.sleep(0.05)
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+
+        mock_proc.send_signal.assert_called_once_with(signal.SIGTERM)
