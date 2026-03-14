@@ -72,7 +72,7 @@ export default function TaskList() {
         <span>
           {record.completed_images}/{record.total_images}
           {record.failed_images > 0 && (
-            <span style={{ color: '#ff4d4f', marginLeft: 4 }}>
+            <span style={{ color: '#EF6461', marginLeft: 4 }}>
               ({record.failed_images} 失败)
             </span>
           )}
@@ -97,6 +97,7 @@ export default function TaskList() {
 
   return (
     <Card
+      className="glass-card"
       title="构建任务列表"
       extra={
         <Space>

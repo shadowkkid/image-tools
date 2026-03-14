@@ -96,7 +96,7 @@ export default function TaskCreate() {
 
   return (
     <>
-      <Card title="创建构建任务" style={{ maxWidth: 720, margin: '0 auto' }}>
+      <Card className="glass-card" title="创建构建任务" style={{ maxWidth: 720, margin: '0 auto' }}>
         <Form
           form={form}
           layout="vertical"

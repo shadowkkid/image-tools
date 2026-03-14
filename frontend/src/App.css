@@ -1,0 +1,83 @@
+/* Header */
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  padding: 0 24px;
+  height: 56px;
+  background: rgba(13, 13, 13, 0.8);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.header-title {
+  background: linear-gradient(135deg, #7C5CFC 0%, #5BA0F6 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  font-size: 18px;
+  font-weight: 700;
+  cursor: pointer;
+  user-select: none;
+  margin: 0;
+  line-height: 56px;
+}
+
+/* Content area */
+.app-content {
+  padding: 32px;
+  max-width: 1200px;
+  margin: 0 auto;
+  width: 100%;
+}
+
+/* Glass card */
+.glass-card {
+  background: rgba(255, 255, 255, 0.03) !important;
+  border: 1px solid rgba(255, 255, 255, 0.06) !important;
+  border-radius: 12px !important;
+  transition: border-color 0.2s ease;
+}
+.glass-card:hover {
+  border-color: rgba(255, 255, 255, 0.10) !important;
+}
+
+/* Code */
+code {
+  background: rgba(124, 92, 252, 0.1);
+  color: #C4B5FD;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 0.875em;
+}
+
+/* Error detail blocks */
+pre {
+  background: rgba(239, 100, 97, 0.08);
+  border: 1px solid rgba(239, 100, 97, 0.15);
+  border-radius: 8px;
+  padding: 12px;
+  color: #E8E8E8;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-size: 12px;
+}
+
+/* Antd overrides */
+.ant-card-head {
+  border-bottom-color: rgba(255, 255, 255, 0.06) !important;
+}
+
+.ant-descriptions-bordered .ant-descriptions-item-label {
+  background: rgba(255, 255, 255, 0.03) !important;
+}
+
+.ant-table-row {
+  transition: background 0.15s ease;
+}
+.ant-table-row:hover > td {
+  background: rgba(255, 255, 255, 0.04) !important;
+}

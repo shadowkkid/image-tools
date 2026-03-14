@@ -223,7 +223,7 @@ export default function TaskDetail() {
         {isRunning && <Tag color="processing">任务运行中，自动刷新</Tag>}
       </Space>
 
-      <Card title="任务详情" style={{ marginBottom: 16 }}>
+      <Card className="glass-card" title="任务详情" style={{ marginBottom: 16 }}>
         <Descriptions column={2} bordered size="small">
           <Descriptions.Item label="任务名称">{task.task_name}</Descriptions.Item>
           <Descriptions.Item label="状态">
@@ -245,13 +245,13 @@ export default function TaskDetail() {
           <Descriptions.Item label="总耗时">{formatSeconds(task.elapsed_seconds)}</Descriptions.Item>
           <Descriptions.Item label="进度">
             {task.completed_images}/{task.total_images} 完成
-            {task.failed_images > 0 && <span style={{ color: '#ff4d4f' }}>, {task.failed_images} 失败</span>}
+            {task.failed_images > 0 && <span style={{ color: '#EF6461' }}>, {task.failed_images} 失败</span>}
           </Descriptions.Item>
           <Descriptions.Item label="创建时间">{new Date(task.created_at).toLocaleString()}</Descriptions.Item>
         </Descriptions>
       </Card>
 
-      <Card title="镜像构建详情">
+      <Card className="glass-card" title="镜像构建详情">
         <Table
           dataSource={task.images}
           columns={imageColumns}
