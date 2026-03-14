@@ -111,11 +111,12 @@ class TaskManager:
 
     @staticmethod
     def _get_task_images(task: BuildTask) -> set[str]:
-        """Return the set of base images and deps_image used by a task."""
-        images = set(task.base_images)
-        if task.deps_image:
-            images.add(task.deps_image)
-        return images
+        """Return the set of base images used by a task.
+
+        deps_image is excluded — it's large, slow to pull, and shared across
+        tasks, so we deliberately keep it cached on disk.
+        """
+        return set(task.base_images)
 
     async def _register_task_images(self, task: BuildTask) -> None:
         """Increment reference count for each image used by the task."""

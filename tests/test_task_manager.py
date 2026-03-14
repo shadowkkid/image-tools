@@ -221,7 +221,7 @@ class TestTaskRestore:
 
 class TestImageRefCounting:
     def test_get_task_images(self):
-        """_get_task_images deduplicates and includes deps_image."""
+        """_get_task_images deduplicates base images and excludes deps_image."""
         task = BuildTask(
             task_name="t",
             deps_image="deps:v1",
@@ -229,7 +229,7 @@ class TestImageRefCounting:
             base_images=["ubuntu:22.04", "ubuntu:22.04", "alpine:3"],
         )
         result = TaskManager._get_task_images(task)
-        assert result == {"ubuntu:22.04", "alpine:3", "deps:v1"}
+        assert result == {"ubuntu:22.04", "alpine:3"}
 
     def test_get_task_images_empty_deps(self):
         """Empty deps_image is excluded from the set."""
@@ -242,16 +242,17 @@ class TestImageRefCounting:
         result = TaskManager._get_task_images(task)
         assert result == {"ubuntu:22.04"}
 
-    def test_get_task_images_deps_same_as_base(self):
-        """deps_image that matches a base_image is deduplicated."""
+    def test_get_task_images_excludes_deps(self):
+        """deps_image is never included in tracked images (kept cached on disk)."""
         task = BuildTask(
             task_name="t",
-            deps_image="ubuntu:22.04",
+            deps_image="deps:v1",
             push_dir="reg/repo",
             base_images=["ubuntu:22.04"],
         )
         result = TaskManager._get_task_images(task)
         assert result == {"ubuntu:22.04"}
+        assert "deps:v1" not in result
 
     @pytest.mark.asyncio
     async def test_register_and_unregister(self, db_path):
@@ -265,10 +266,10 @@ class TestImageRefCounting:
         )
 
         await manager._register_task_images(task)
-        assert manager._image_refs == {"ubuntu:22.04": 1, "deps:v1": 1}
+        assert manager._image_refs == {"ubuntu:22.04": 1}
 
         removed = await manager._unregister_task_images(task)
-        assert set(removed) == {"ubuntu:22.04", "deps:v1"}
+        assert set(removed) == {"ubuntu:22.04"}
         assert manager._image_refs == {}
 
     @pytest.mark.asyncio
@@ -291,19 +292,17 @@ class TestImageRefCounting:
         await manager._register_task_images(task1)
         await manager._register_task_images(task2)
         assert manager._image_refs["ubuntu:22.04"] == 2
-        assert manager._image_refs["deps:v1"] == 2
+        assert "deps:v1" not in manager._image_refs  # deps_image not tracked
         assert manager._image_refs["alpine:3"] == 1
 
-        # First unregister: shared images stay, alpine:3 not in task1
+        # First unregister: shared ubuntu stays
         removed1 = await manager._unregister_task_images(task1)
         assert "ubuntu:22.04" not in removed1
-        assert "deps:v1" not in removed1
         assert manager._image_refs["ubuntu:22.04"] == 1
-        assert manager._image_refs["deps:v1"] == 1
 
-        # Second unregister: all drop to zero
+        # Second unregister: all base images drop to zero
         removed2 = await manager._unregister_task_images(task2)
-        assert set(removed2) == {"ubuntu:22.04", "deps:v1", "alpine:3"}
+        assert set(removed2) == {"ubuntu:22.04", "alpine:3"}
         assert manager._image_refs == {}
 
     @pytest.mark.asyncio
@@ -324,7 +323,8 @@ class TestImageRefCounting:
             await manager._cleanup_task_images(task)
 
             removed_images = {call.args[0] for call in mock_remove.call_args_list}
-            assert removed_images == {"ubuntu:22.04", "deps:v1"}
+            assert removed_images == {"ubuntu:22.04"}
+            assert "deps:v1" not in removed_images
             mock_prune.assert_called_once()
 
     @pytest.mark.asyncio
