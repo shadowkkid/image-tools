@@ -95,6 +95,7 @@ class BuildTask:
     base_images: list[str]
     build_args: list[str] = field(default_factory=list)
     retry_count: int = 0
+    concurrency: int = 1
     source_dir: str = ""
     task_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     status: TaskStatus = TaskStatus.PENDING

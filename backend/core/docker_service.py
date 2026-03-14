@@ -66,6 +66,7 @@ class DockerService:
         build_context_path: str,
         tags: list[str],
         build_args: list[str] | None = None,
+        dockerfile_path: str | None = None,
     ) -> tuple[bool, str, list[str]]:
         """Execute docker buildx build. Returns (success, output_log, output_lines)."""
         cmd = [
@@ -74,6 +75,9 @@ class DockerService:
             "--load",
             "--provenance=false",
         ]
+        if dockerfile_path:
+            cmd.extend(["-f", dockerfile_path])
+
         for tag in tags:
             cmd.extend(["-t", tag])
 

@@ -200,6 +200,7 @@ export default function TaskDetail() {
             </Descriptions.Item>
           )}
           <Descriptions.Item label="重试次数">{task.retry_count}</Descriptions.Item>
+          <Descriptions.Item label="并行度">{task.concurrency}</Descriptions.Item>
           <Descriptions.Item label="总耗时">{formatSeconds(task.elapsed_seconds)}</Descriptions.Item>
           <Descriptions.Item label="进度">
             {task.completed_images}/{task.total_images} 完成

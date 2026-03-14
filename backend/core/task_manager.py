@@ -1,8 +1,13 @@
 import asyncio
 import logging
+import shutil
 from datetime import datetime
 
-from backend.builder.image_builder import ImageBuilder, _compute_target_image
+from backend.builder.image_builder import (
+    ImageBuilder,
+    _compute_target_image,
+    prep_shared_build_context,
+)
 from backend.core.task_models import (
     BuildTask,
     ImageBuildInfo,
@@ -30,6 +35,7 @@ class TaskManager:
         build_args: list[str] | None = None,
         retry_count: int = 0,
         source_dir: str | None = None,
+        concurrency: int = 1,
     ) -> BuildTask:
         """Create a new build task and start execution in background."""
         task = BuildTask(
@@ -40,6 +46,7 @@ class TaskManager:
             build_args=build_args or [],
             retry_count=retry_count,
             source_dir=source_dir or DEFAULT_SOURCE_DIR,
+            concurrency=max(1, concurrency),
         )
 
         # Create ImageBuildInfo for each base image
@@ -61,14 +68,57 @@ class TaskManager:
         return task
 
     async def _execute_task(self, task: BuildTask) -> None:
-        """Execute all image builds sequentially for a task."""
+        """Execute all image builds with configurable concurrency."""
         task.status = TaskStatus.RUNNING
+        shared_build_dir = None
 
-        for image_info in task.images:
-            try:
-                await self.image_builder.build_image(image_info, task)
-            except Exception as e:
-                logger.error(f"Unexpected error building {image_info.base_image}: {e}")
+        try:
+            # Prepare shared build context once for all images
+            logger.info(f"Task [{task.task_name}] preparing shared build context...")
+            shared_build_dir = await asyncio.get_event_loop().run_in_executor(
+                None, prep_shared_build_context, task.source_dir
+            )
+            logger.info(f"Task [{task.task_name}] shared build context ready")
+
+            if task.concurrency <= 1:
+                # Sequential execution
+                for image_info in task.images:
+                    try:
+                        await self.image_builder.build_image(
+                            image_info, task, shared_build_dir
+                        )
+                    except Exception as e:
+                        logger.error(
+                            f"Unexpected error building {image_info.base_image}: {e}"
+                        )
+            else:
+                # Parallel execution with semaphore
+                sem = asyncio.Semaphore(task.concurrency)
+
+                async def build_with_limit(img: ImageBuildInfo):
+                    async with sem:
+                        try:
+                            await self.image_builder.build_image(
+                                img, task, shared_build_dir
+                            )
+                        except Exception as e:
+                            logger.error(
+                                f"Unexpected error building {img.base_image}: {e}"
+                            )
+
+                await asyncio.gather(
+                    *(build_with_limit(img) for img in task.images)
+                )
+
+        except Exception as e:
+            logger.error(f"Task [{task.task_name}] failed to prepare build context: {e}")
+            task.status = TaskStatus.FAILED
+            task.finished_at = datetime.now()
+            return
+        finally:
+            # Clean up shared build context
+            if shared_build_dir:
+                shutil.rmtree(shared_build_dir, ignore_errors=True)
 
         # Determine final task status
         task.finished_at = datetime.now()

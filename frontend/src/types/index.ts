@@ -35,6 +35,7 @@ export interface TaskDetailData {
   push_dir: string;
   build_args: string[];
   retry_count: number;
+  concurrency: number;
   source_dir: string;
   created_at: string;
   finished_at: string | null;

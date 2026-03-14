@@ -54,18 +54,56 @@ def _compute_build_image_tag(push_dir: str, base_image: str) -> str:
     return f"image-tools-build/{target.split('/')[-1]}"
 
 
+def prep_shared_build_context(source_dir: str) -> str:
+    """Copy OpenHands source files to a shared temp directory (once per task).
+
+    Returns the path to the shared code directory.
+    """
+    shared_dir = tempfile.mkdtemp(prefix="image-tools-shared-")
+    code_dir = os.path.join(shared_dir, "code")
+    os.makedirs(code_dir, exist_ok=True)
+
+    source_path = Path(source_dir)
+
+    # Copy openhands/ directory (exclude node_modules, __pycache__, .* dirs, .pyc, .md)
+    openhands_src = source_path / "openhands"
+    if openhands_src.is_dir():
+        shutil.copytree(
+            openhands_src,
+            Path(code_dir, "openhands"),
+            ignore=shutil.ignore_patterns(
+                ".*", "__pycache__", "*.pyc", "*.md", "node_modules",
+            ),
+        )
+
+    # Copy microagents/ directory
+    microagents_src = source_path / "microagents"
+    if microagents_src.is_dir():
+        shutil.copytree(microagents_src, Path(code_dir, "microagents"))
+
+    # Copy pyproject.toml and poetry.lock
+    for filename in ["pyproject.toml", "poetry.lock"]:
+        src_file = source_path / filename
+        if src_file.exists():
+            shutil.copy2(src_file, Path(code_dir, filename))
+
+    return shared_dir
+
+
 class ImageBuilder:
     def __init__(self):
         self.docker_service = DockerService()
         self.dockerfile_generator = DockerfileGenerator()
 
-    async def build_image(self, image_info: ImageBuildInfo, task: BuildTask) -> None:
+    async def build_image(
+        self, image_info: ImageBuildInfo, task: BuildTask, shared_build_dir: str
+    ) -> None:
         """Execute the full 4-stage build pipeline for a single image."""
         image_info.status = ImageBuildStatus.BUILDING
         image_info.started_at = datetime.now()
 
         try:
-            await self._run_with_retry(image_info, task)
+            await self._run_with_retry(image_info, task, shared_build_dir)
         except Exception as e:
             image_info.status = ImageBuildStatus.FAILED
             image_info.error_message = str(e)
@@ -73,7 +111,9 @@ class ImageBuilder:
         finally:
             image_info.finished_at = datetime.now()
 
-    async def _run_with_retry(self, image_info: ImageBuildInfo, task: BuildTask) -> None:
+    async def _run_with_retry(
+        self, image_info: ImageBuildInfo, task: BuildTask, shared_build_dir: str
+    ) -> None:
         max_attempts = task.retry_count + 1  # retry_count=0 means 1 attempt
 
         for attempt in range(max_attempts):
@@ -90,7 +130,7 @@ class ImageBuilder:
                 )
 
             try:
-                await self._execute_pipeline(image_info, task)
+                await self._execute_pipeline(image_info, task, shared_build_dir)
                 image_info.status = ImageBuildStatus.SUCCESS
                 return
             except _StageError as e:
@@ -106,18 +146,20 @@ class ImageBuilder:
                         f"All {max_attempts} attempts failed for {image_info.base_image}"
                     )
 
-    async def _execute_pipeline(self, image_info: ImageBuildInfo, task: BuildTask) -> None:
+    async def _execute_pipeline(
+        self, image_info: ImageBuildInfo, task: BuildTask, shared_build_dir: str
+    ) -> None:
         build_tag = _compute_build_image_tag(task.push_dir, image_info.base_image)
 
-        # Stage 1: Generate Dockerfile
-        build_dir = await self._stage_generate_dockerfile(
-            image_info, task, build_tag
+        # Stage 1: Generate Dockerfile into shared dir (unique name per image)
+        dockerfile_path = await self._stage_generate_dockerfile(
+            image_info, task, shared_build_dir
         )
 
         try:
-            # Stage 2: Docker build
+            # Stage 2: Docker build (use shared dir as context, -f for Dockerfile)
             await self._stage_docker_build(
-                image_info, task, build_dir, build_tag
+                image_info, task, shared_build_dir, build_tag, dockerfile_path
             )
 
             # Stage 3: Docker tag
@@ -128,9 +170,9 @@ class ImageBuilder:
             # Stage 4: Docker push
             await self._stage_docker_push(image_info, image_info.target_image)
         finally:
-            # Clean up temp build dir
-            if build_dir and os.path.exists(build_dir):
-                shutil.rmtree(build_dir, ignore_errors=True)
+            # Clean up per-image Dockerfile
+            if dockerfile_path and os.path.exists(dockerfile_path):
+                os.remove(dockerfile_path)
 
     def _get_stage(self, image_info: ImageBuildInfo, stage_name: StageName):
         for stage in image_info.stages:
@@ -153,8 +195,9 @@ class ImageBuilder:
             stage.error_message = error_message
 
     async def _stage_generate_dockerfile(
-        self, image_info: ImageBuildInfo, task: BuildTask, build_tag: str
+        self, image_info: ImageBuildInfo, task: BuildTask, shared_build_dir: str
     ) -> str:
+        """Generate Dockerfile into shared build dir with a unique name per image."""
         stage = self._start_stage(image_info, StageName.GENERATE_DOCKERFILE)
 
         try:
@@ -163,60 +206,21 @@ class ImageBuilder:
                 deps_image=task.deps_image,
             )
 
-            # Create temp build directory and prepare build context
-            build_dir = tempfile.mkdtemp(prefix="image-tools-build-")
-            code_dir = os.path.join(build_dir, "code")
-            os.makedirs(code_dir, exist_ok=True)
+            # Use unique Dockerfile name to support parallel builds
+            safe_name = image_info.base_image.replace("/", "_").replace(":", "_")
+            dockerfile_path = os.path.join(
+                shared_build_dir, f"Dockerfile.{safe_name}"
+            )
 
-            # Write Dockerfile
-            with open(os.path.join(build_dir, "Dockerfile"), "w") as f:
+            with open(dockerfile_path, "w") as f:
                 f.write(dockerfile_content)
 
-            # Copy OpenHands source code to build context
-            source_dir = task.source_dir
-            if source_dir and os.path.isdir(source_dir):
-                self._prep_build_context(source_dir, code_dir)
-            else:
-                raise _StageError(
-                    StageName.GENERATE_DOCKERFILE,
-                    f"OpenHands source directory not found: {source_dir}",
-                )
-
             self._finish_stage(stage, True)
-            return build_dir
+            return dockerfile_path
 
-        except _StageError:
-            self._finish_stage(stage, False, stage.error_message)
-            raise
         except Exception as e:
             self._finish_stage(stage, False, str(e))
             raise _StageError(StageName.GENERATE_DOCKERFILE, str(e))
-
-    def _prep_build_context(self, source_dir: str, code_dir: str) -> None:
-        """Copy OpenHands source files to build context, matching prep_build_folder logic."""
-        source_path = Path(source_dir)
-
-        # Copy openhands/ directory
-        openhands_src = source_path / "openhands"
-        if openhands_src.is_dir():
-            shutil.copytree(
-                openhands_src,
-                Path(code_dir, "openhands"),
-                ignore=shutil.ignore_patterns(
-                    ".*", "__pycache__", "*.pyc", "*.md",
-                ),
-            )
-
-        # Copy microagents/ directory
-        microagents_src = source_path / "microagents"
-        if microagents_src.is_dir():
-            shutil.copytree(microagents_src, Path(code_dir, "microagents"))
-
-        # Copy pyproject.toml and poetry.lock
-        for filename in ["pyproject.toml", "poetry.lock"]:
-            src_file = source_path / filename
-            if src_file.exists():
-                shutil.copy2(src_file, Path(code_dir, filename))
 
     async def _stage_docker_build(
         self,
@@ -224,6 +228,7 @@ class ImageBuilder:
         task: BuildTask,
         build_dir: str,
         build_tag: str,
+        dockerfile_path: str | None = None,
     ) -> None:
         stage = self._start_stage(image_info, StageName.DOCKER_BUILD)
 
@@ -232,6 +237,7 @@ class ImageBuilder:
                 build_context_path=build_dir,
                 tags=[build_tag],
                 build_args=task.build_args if task.build_args else None,
+                dockerfile_path=dockerfile_path,
             )
 
             if not success:

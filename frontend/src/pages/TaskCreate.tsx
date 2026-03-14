@@ -64,6 +64,7 @@ export default function TaskCreate() {
       push_dir: values.push_dir as string,
       build_args: buildArgs,
       retry_count: (values.retry_count as number) ?? 0,
+      concurrency: (values.concurrency as number) ?? 1,
       source_dir: (values.source_dir as string) || undefined,
     });
 
@@ -91,7 +92,7 @@ export default function TaskCreate() {
         <Form
           form={form}
           layout="vertical"
-          initialValues={{ retry_count: 0 }}
+          initialValues={{ retry_count: 0, concurrency: 1 }}
         >
           <Form.Item
             label="任务名称"
@@ -139,6 +140,14 @@ export default function TaskCreate() {
 
           <Form.Item label="每条命令重试次数" name="retry_count">
             <InputNumber min={0} max={10} style={{ width: 120 }} />
+          </Form.Item>
+
+          <Form.Item
+            label="并行度"
+            name="concurrency"
+            extra="同时构建的镜像数量，建议 1-4"
+          >
+            <InputNumber min={1} max={10} style={{ width: 120 }} />
           </Form.Item>
 
           <Form.Item
