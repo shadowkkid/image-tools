@@ -16,6 +16,11 @@ frontend/dist/
 # OS
 .DS_Store
 
+# Database
+*.db
+*.sqlite
+backend/data/
+
 # Temp
 *.tmp
 /tmp/

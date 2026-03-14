@@ -150,6 +150,7 @@ class ImageBuilder:
         self, image_info: ImageBuildInfo, task: BuildTask, shared_build_dir: str
     ) -> None:
         build_tag = _compute_build_image_tag(task.push_dir, image_info.base_image)
+        push_succeeded = False
 
         # Stage 1: Generate Dockerfile into shared dir (unique name per image)
         dockerfile_path = await self._stage_generate_dockerfile(
@@ -169,10 +170,29 @@ class ImageBuilder:
 
             # Stage 4: Docker push
             await self._stage_docker_push(image_info, image_info.target_image)
+            push_succeeded = True
         finally:
             # Clean up per-image Dockerfile
             if dockerfile_path and os.path.exists(dockerfile_path):
                 os.remove(dockerfile_path)
+
+            # Clean up local Docker images
+            await self._cleanup_images(build_tag, image_info.target_image, push_succeeded)
+
+    async def _cleanup_images(
+        self, build_tag: str, target_image: str, push_succeeded: bool
+    ) -> None:
+        """Remove temporary local Docker images after build.
+
+        - Always remove the build tag (image-tools-build/...)
+        - Remove target tag only if push succeeded (already in remote registry)
+        """
+        # Always remove build tag
+        await self.docker_service.remove_image(build_tag)
+
+        # Remove target tag if push succeeded (image is in the remote registry)
+        if push_succeeded:
+            await self.docker_service.remove_image(target_image)
 
     def _get_stage(self, image_info: ImageBuildInfo, stage_name: StageName):
         for stage in image_info.stages:

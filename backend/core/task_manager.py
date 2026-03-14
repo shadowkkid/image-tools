@@ -8,6 +8,8 @@ from backend.builder.image_builder import (
     _compute_target_image,
     prep_shared_build_context,
 )
+from backend.core.database import init_db, load_all_tasks, save_task
+from backend.core.docker_service import DockerService
 from backend.core.task_models import (
     BuildTask,
     ImageBuildInfo,
@@ -22,11 +24,40 @@ DEFAULT_SOURCE_DIR = "/home/SENSETIME/lizimu/workspace/python/OpenHands_Ss"
 
 
 class TaskManager:
-    def __init__(self):
+    def __init__(self, db_path: str | None = None):
+        self.db_path = init_db(db_path)
         self.tasks: dict[str, BuildTask] = {}
         self._async_tasks: dict[str, asyncio.Task] = {}
         self.image_builder = ImageBuilder()
         self._lock = asyncio.Lock()
+
+        # Restore tasks from DB
+        self._restore_tasks()
+
+    def _restore_tasks(self) -> None:
+        """Load tasks from DB and mark interrupted running tasks as failed."""
+        self.tasks = load_all_tasks(self.db_path)
+        for task in self.tasks.values():
+            if task.status == TaskStatus.RUNNING:
+                logger.warning(
+                    f"Task [{task.task_name}] was running when server stopped, marking as failed"
+                )
+                task.status = TaskStatus.FAILED
+                task.finished_at = task.finished_at or datetime.now()
+                for img in task.images:
+                    if img.status in (ImageBuildStatus.PENDING, ImageBuildStatus.BUILDING):
+                        img.status = ImageBuildStatus.FAILED
+                        img.error_message = "Server restarted while task was running"
+                        img.finished_at = img.finished_at or datetime.now()
+                save_task(task, self.db_path)
+        logger.info(f"Restored {len(self.tasks)} tasks from database")
+
+    def _save(self, task: BuildTask) -> None:
+        """Persist task state to DB."""
+        try:
+            save_task(task, self.db_path)
+        except Exception as e:
+            logger.error(f"Failed to save task [{task.task_name}] to DB: {e}")
 
     async def create_task(
         self,
@@ -64,6 +95,9 @@ class TaskManager:
         async with self._lock:
             self.tasks[task.task_id] = task
 
+        # Save to DB after creation
+        self._save(task)
+
         # Start background execution
         bg_task = asyncio.create_task(self._execute_task(task))
         self._async_tasks[task.task_id] = bg_task
@@ -73,6 +107,7 @@ class TaskManager:
     async def _execute_task(self, task: BuildTask) -> None:
         """Execute all image builds with configurable concurrency."""
         task.status = TaskStatus.RUNNING
+        self._save(task)
         shared_build_dir = None
 
         try:
@@ -94,6 +129,8 @@ class TaskManager:
                         logger.error(
                             f"Unexpected error building {image_info.base_image}: {e}"
                         )
+                    finally:
+                        self._save(task)
             else:
                 # Parallel execution with semaphore
                 sem = asyncio.Semaphore(task.concurrency)
@@ -108,6 +145,8 @@ class TaskManager:
                             logger.error(
                                 f"Unexpected error building {img.base_image}: {e}"
                             )
+                        finally:
+                            self._save(task)
 
                 await asyncio.gather(
                     *(build_with_limit(img) for img in task.images)
@@ -121,11 +160,13 @@ class TaskManager:
                 if img.status in (ImageBuildStatus.PENDING, ImageBuildStatus.BUILDING):
                     img.status = ImageBuildStatus.CANCELLED
             task.finished_at = datetime.now()
+            self._save(task)
             return
         except Exception as e:
             logger.error(f"Task [{task.task_name}] failed to prepare build context: {e}")
             task.status = TaskStatus.FAILED
             task.finished_at = datetime.now()
+            self._save(task)
             return
         finally:
             # Clean up shared build context
@@ -144,10 +185,18 @@ class TaskManager:
         else:
             task.status = TaskStatus.PARTIAL_FAILED
 
+        self._save(task)
+
         logger.info(
             f"Task [{task.task_name}] finished: {task.status.value} "
             f"({task.completed_images}/{task.total_images} succeeded)"
         )
+
+        # Prune dangling Docker images after task completes
+        try:
+            await DockerService.prune_images()
+        except Exception as e:
+            logger.warning(f"Failed to prune Docker images: {e}")
 
     def get_task(self, task_id: str) -> BuildTask | None:
         return self.tasks.get(task_id)

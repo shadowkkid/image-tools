@@ -86,3 +86,47 @@ class TestDockerTag:
         with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
             ok, msg = await DockerService.tag("src:v1", "dst:v1")
             assert ok is True
+
+
+class TestDockerRemoveImage:
+    @pytest.mark.asyncio
+    async def test_remove_success(self):
+        mock_proc = AsyncMock()
+        mock_proc.communicate = AsyncMock(return_value=(b"Untagged: img:v1\n", b""))
+        mock_proc.returncode = 0
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+            ok, msg = await DockerService.remove_image("img:v1")
+            assert ok is True
+
+    @pytest.mark.asyncio
+    async def test_remove_failure(self):
+        mock_proc = AsyncMock()
+        mock_proc.communicate = AsyncMock(return_value=(b"", b"No such image"))
+        mock_proc.returncode = 1
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+            ok, msg = await DockerService.remove_image("nonexistent:v1")
+            assert ok is False
+
+
+class TestDockerPruneImages:
+    @pytest.mark.asyncio
+    async def test_prune_success(self):
+        mock_proc = AsyncMock()
+        mock_proc.communicate = AsyncMock(return_value=(b"Total reclaimed space: 100MB\n", b""))
+        mock_proc.returncode = 0
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+            ok, msg = await DockerService.prune_images()
+            assert ok is True
+
+    @pytest.mark.asyncio
+    async def test_prune_failure(self):
+        mock_proc = AsyncMock()
+        mock_proc.communicate = AsyncMock(return_value=(b"", b"error"))
+        mock_proc.returncode = 1
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+            ok, msg = await DockerService.prune_images()
+            assert ok is False

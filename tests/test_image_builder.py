@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, call, patch
 import pytest
 
 from backend.builder.image_builder import (
@@ -98,11 +98,16 @@ class TestImageBuilder:
                 with patch.object(builder.docker_service, "push",
                                   new_callable=AsyncMock,
                                   return_value=(True, "Push OK")):
-                    await builder.build_image(image_info, task, shared_dir)
+                    with patch.object(builder.docker_service, "remove_image",
+                                      new_callable=AsyncMock,
+                                      return_value=(True, "Removed")) as mock_remove:
+                        await builder.build_image(image_info, task, shared_dir)
 
         assert image_info.status == ImageBuildStatus.SUCCESS
         assert all(s.status == StageStatus.SUCCESS for s in image_info.stages)
         assert image_info.finished_at is not None
+        # Verify cleanup: build tag + target tag (push succeeded)
+        assert mock_remove.call_count == 2
 
     @pytest.mark.asyncio
     async def test_build_failure_with_retry(self, task, image_info, shared_dir):
@@ -124,7 +129,10 @@ class TestImageBuilder:
                 with patch.object(builder.docker_service, "push",
                                   new_callable=AsyncMock,
                                   return_value=(True, "Push OK")):
-                    await builder.build_image(image_info, task, shared_dir)
+                    with patch.object(builder.docker_service, "remove_image",
+                                      new_callable=AsyncMock,
+                                      return_value=(True, "Removed")):
+                        await builder.build_image(image_info, task, shared_dir)
 
         assert image_info.status == ImageBuildStatus.SUCCESS
         assert image_info.retry_attempts == 1
@@ -136,7 +144,10 @@ class TestImageBuilder:
         with patch.object(builder.docker_service, "build",
                           new_callable=AsyncMock,
                           return_value=(False, "ERROR: always fails", ["ERROR: always fails"])):
-            await builder.build_image(image_info, task, shared_dir)
+            with patch.object(builder.docker_service, "remove_image",
+                              new_callable=AsyncMock,
+                              return_value=(True, "Removed")):
+                await builder.build_image(image_info, task, shared_dir)
 
         assert image_info.status == ImageBuildStatus.FAILED
         assert "docker_build" in (image_info.error_message or "")
@@ -155,7 +166,81 @@ class TestImageBuilder:
                 with patch.object(builder.docker_service, "push",
                                   new_callable=AsyncMock,
                                   return_value=(False, "push denied")):
-                    await builder.build_image(image_info, task, shared_dir)
+                    with patch.object(builder.docker_service, "remove_image",
+                                      new_callable=AsyncMock,
+                                      return_value=(True, "Removed")) as mock_remove:
+                        await builder.build_image(image_info, task, shared_dir)
 
         assert image_info.status == ImageBuildStatus.FAILED
         assert "docker_push" in (image_info.error_message or "")
+        # Only build tag cleaned (push failed, target tag not removed)
+        assert mock_remove.call_count == 1
+
+
+class TestImageCleanup:
+    @pytest.mark.asyncio
+    async def test_cleanup_on_success_removes_both_tags(self, task, image_info, shared_dir):
+        """After successful push, both build tag and target tag should be removed."""
+        builder = ImageBuilder()
+
+        with patch.object(builder.docker_service, "build",
+                          new_callable=AsyncMock,
+                          return_value=(True, "Build OK", ["Build OK"])):
+            with patch.object(builder.docker_service, "tag",
+                              new_callable=AsyncMock,
+                              return_value=(True, "Tag OK")):
+                with patch.object(builder.docker_service, "push",
+                                  new_callable=AsyncMock,
+                                  return_value=(True, "Push OK")):
+                    with patch.object(builder.docker_service, "remove_image",
+                                      new_callable=AsyncMock,
+                                      return_value=(True, "Removed")) as mock_remove:
+                        await builder.build_image(image_info, task, shared_dir)
+
+        calls = mock_remove.call_args_list
+        # First call: build tag
+        assert "image-tools-build/" in calls[0].args[0]
+        # Second call: target image
+        assert calls[1].args[0] == image_info.target_image
+
+    @pytest.mark.asyncio
+    async def test_cleanup_on_push_failure_only_removes_build_tag(self, task, image_info, shared_dir):
+        """When push fails, only build tag should be removed (target tag kept for debugging)."""
+        task.retry_count = 0
+        builder = ImageBuilder()
+
+        with patch.object(builder.docker_service, "build",
+                          new_callable=AsyncMock,
+                          return_value=(True, "Build OK", ["Build OK"])):
+            with patch.object(builder.docker_service, "tag",
+                              new_callable=AsyncMock,
+                              return_value=(True, "Tag OK")):
+                with patch.object(builder.docker_service, "push",
+                                  new_callable=AsyncMock,
+                                  return_value=(False, "push denied")):
+                    with patch.object(builder.docker_service, "remove_image",
+                                      new_callable=AsyncMock,
+                                      return_value=(True, "Removed")) as mock_remove:
+                        await builder.build_image(image_info, task, shared_dir)
+
+        # Only the build tag should be removed
+        assert mock_remove.call_count == 1
+        assert "image-tools-build/" in mock_remove.call_args.args[0]
+
+    @pytest.mark.asyncio
+    async def test_cleanup_on_build_failure_removes_build_tag(self, task, image_info, shared_dir):
+        """When build fails, build tag cleanup should still be attempted."""
+        task.retry_count = 0
+        builder = ImageBuilder()
+
+        with patch.object(builder.docker_service, "build",
+                          new_callable=AsyncMock,
+                          return_value=(False, "ERROR: fail", ["ERROR: fail"])):
+            with patch.object(builder.docker_service, "remove_image",
+                              new_callable=AsyncMock,
+                              return_value=(True, "Removed")) as mock_remove:
+                await builder.build_image(image_info, task, shared_dir)
+
+        # Build tag removal attempted (best-effort)
+        assert mock_remove.call_count == 1
+        assert "image-tools-build/" in mock_remove.call_args.args[0]

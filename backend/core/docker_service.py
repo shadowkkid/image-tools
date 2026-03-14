@@ -145,3 +145,37 @@ class DockerService:
         if proc.returncode == 0:
             return True, output or "Push succeeded"
         return False, output or "Push failed"
+
+    @staticmethod
+    async def remove_image(image: str) -> tuple[bool, str]:
+        """Remove a local Docker image (best-effort)."""
+        proc = await asyncio.create_subprocess_exec(
+            "docker", "rmi", image,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        output = (stdout.decode() + stderr.decode()).strip()
+
+        if proc.returncode == 0:
+            logger.info(f"Removed image: {image}")
+            return True, output or "Image removed"
+        logger.debug(f"Failed to remove image {image}: {output}")
+        return False, output or "Remove failed"
+
+    @staticmethod
+    async def prune_images() -> tuple[bool, str]:
+        """Prune dangling Docker images."""
+        proc = await asyncio.create_subprocess_exec(
+            "docker", "image", "prune", "-f",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        output = (stdout.decode() + stderr.decode()).strip()
+
+        if proc.returncode == 0:
+            logger.info(f"Pruned dangling images: {output}")
+            return True, output or "Prune completed"
+        logger.warning(f"Failed to prune images: {output}")
+        return False, output or "Prune failed"
