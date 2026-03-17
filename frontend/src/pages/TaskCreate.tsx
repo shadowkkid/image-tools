@@ -5,13 +5,15 @@ import {
   Form,
   Input,
   InputNumber,
+  Select,
   Button,
   message,
   Space,
 } from 'antd';
 import { ArrowLeftOutlined } from '@ant-design/icons';
-import { checkAuth, createTask } from '../api/client';
+import { checkAuth, createTask, listAgents } from '../api/client';
 import LoginModal from '../components/LoginModal';
+import type { AgentInfo } from '../types';
 
 const { TextArea } = Input;
 
@@ -22,14 +24,46 @@ export default function TaskCreate() {
   const [loading, setLoading] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
   const [loginRegistry, setLoginRegistry] = useState('');
+  const [agents, setAgents] = useState<AgentInfo[]>([]);
+  const [selectedAgent, setSelectedAgent] = useState<AgentInfo | null>(null);
+
+  useEffect(() => {
+    listAgents().then((res) => {
+      setAgents(res.agents);
+      // If only one agent, auto-select it
+      if (res.agents.length === 1) {
+        const agent = res.agents[0];
+        setSelectedAgent(agent);
+        form.setFieldsValue({ agent: agent.name });
+        if (agent.has_versions && agent.versions.length === 1) {
+          form.setFieldsValue({ agent_version: agent.versions[0] });
+        }
+      }
+    });
+  }, []);
 
   // Pre-fill form from clone data (via location.state)
   useEffect(() => {
     const state = location.state as Record<string, unknown> | null;
     if (state) {
       form.setFieldsValue(state);
+      // Restore selectedAgent for version dropdown visibility
+      if (state.agent && agents.length > 0) {
+        const a = agents.find((ag) => ag.name === state.agent);
+        if (a) setSelectedAgent(a);
+      }
     }
-  }, []);
+  }, [agents]);
+
+  const handleAgentChange = (agentName: string) => {
+    const agent = agents.find((a) => a.name === agentName) || null;
+    setSelectedAgent(agent);
+    form.setFieldsValue({ agent_version: undefined });
+    // Auto-select if only one version
+    if (agent?.has_versions && agent.versions.length === 1) {
+      form.setFieldsValue({ agent_version: agent.versions[0] });
+    }
+  };
 
   const handleSubmit = async () => {
     try {
@@ -69,6 +103,8 @@ export default function TaskCreate() {
 
     const res = await createTask({
       task_name: values.task_name as string,
+      agent: values.agent as string,
+      agent_version: (values.agent_version as string) || '',
       dataset: values.dataset as string,
       base_images: baseImages,
       push_dir: values.push_dir as string,
@@ -83,7 +119,6 @@ export default function TaskCreate() {
 
   const handleLoginSuccess = async () => {
     setLoginOpen(false);
-    // Retry submit after login
     const values = form.getFieldsValue();
     setLoading(true);
     try {
@@ -111,11 +146,40 @@ export default function TaskCreate() {
             <Input placeholder="例如: build-runtime-v1" />
           </Form.Item>
 
+          <Space size={12} style={{ display: 'flex' }}>
+            <Form.Item
+              label="Agent"
+              name="agent"
+              rules={[{ required: true, message: '请选择 Agent' }]}
+              style={{ flex: 1 }}
+            >
+              <Select
+                placeholder="选择 Agent"
+                onChange={handleAgentChange}
+                options={agents.map((a) => ({ label: a.name, value: a.name }))}
+              />
+            </Form.Item>
+
+            {selectedAgent?.has_versions && (
+              <Form.Item
+                label="Version"
+                name="agent_version"
+                rules={[{ required: true, message: '请选择版本' }]}
+                style={{ flex: 1 }}
+              >
+                <Select
+                  placeholder="选择版本"
+                  options={selectedAgent.versions.map((v) => ({ label: v, value: v }))}
+                />
+              </Form.Item>
+            )}
+          </Space>
+
           <Form.Item
             label="数据集"
             name="dataset"
             rules={[{ required: true, message: '请输入数据集名称' }]}
-            extra="构建成功的镜像将自动归入该数据集"
+            extra="构建成功的镜像将自动归入该数据集（同 Agent 下）"
           >
             <Input placeholder="例如: swe-bench-verified" />
           </Form.Item>

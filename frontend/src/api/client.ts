@@ -4,16 +4,16 @@ import type {
   TaskDetailData,
   CheckAuthResponse,
   LoginResponse,
+  AgentInfo,
   DatasetSummary,
   DatasetImageItem,
-  ConfigData,
 } from '../types';
 
 const api = axios.create({ baseURL: '/api' });
 
-// Config
-export async function getConfig(): Promise<ConfigData> {
-  const { data } = await api.get('/config');
+// Agents
+export async function listAgents(): Promise<{ agents: AgentInfo[] }> {
+  const { data } = await api.get('/agents');
   return data;
 }
 
@@ -39,6 +39,8 @@ export async function dockerLogin(
 // Tasks
 export interface CreateTaskParams {
   task_name: string;
+  agent: string;
+  agent_version: string;
   dataset: string;
   base_images: string[];
   push_dir: string;
@@ -68,8 +70,10 @@ export async function stopTask(taskId: string): Promise<{ success: boolean; mess
 }
 
 // Datasets
-export async function listDatasets(search: string = ''): Promise<{ datasets: DatasetSummary[] }> {
-  const { data } = await api.get('/datasets', { params: { search } });
+export async function listDatasets(
+  params: { agent?: string; agent_version?: string; search?: string } = {}
+): Promise<{ datasets: DatasetSummary[] }> {
+  const { data } = await api.get('/datasets', { params });
   return data;
 }
 

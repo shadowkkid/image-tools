@@ -116,6 +116,8 @@ export default function TaskDetail() {
   const handleClone = () => {
     const cloneData = {
       task_name: `${task.task_name}-copy`,
+      agent: task.agent,
+      agent_version: task.agent_version,
       dataset: task.dataset,
       push_dir: task.push_dir,
       base_images: task.images.map((img) => img.base_image).join('\n'),
@@ -229,10 +231,10 @@ export default function TaskDetail() {
           <Descriptions.Item label="状态">
             <Tag color={statusColorMap[task.status]}>{statusLabelMap[task.status] || task.status}</Tag>
           </Descriptions.Item>
-          <Descriptions.Item label="数据集">{task.dataset || '-'}</Descriptions.Item>
-          <Descriptions.Item label="Deps 镜像" span={2}>
-            <code>{task.deps_image}</code>
+          <Descriptions.Item label="Agent">
+            {task.agent}{task.agent_version ? ` / ${task.agent_version}` : ''}
           </Descriptions.Item>
+          <Descriptions.Item label="数据集">{task.dataset || '-'}</Descriptions.Item>
           <Descriptions.Item label="推送目标" span={2}>
             <code>{task.push_dir}</code>
           </Descriptions.Item>

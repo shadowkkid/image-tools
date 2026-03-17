@@ -1,32 +1,49 @@
 from fastapi import APIRouter, HTTPException, Query
 
 from backend.api.schemas import (
-    ConfigResponse,
+    AgentInfo,
+    AgentListResponse,
     DatasetImageItem,
     DatasetImageListResponse,
     DatasetListResponse,
     DatasetSummary,
 )
-from backend.config import DEPS_IMAGE
+from backend.config import AGENTS
 from backend.core.database import get_dataset_by_id, list_dataset_images, list_datasets
 from backend.core.task_manager import task_manager
 
 router = APIRouter(prefix="/api", tags=["datasets"])
 
 
-@router.get("/config", response_model=ConfigResponse)
-async def get_config():
-    return ConfigResponse(deps_image=DEPS_IMAGE)
+@router.get("/agents", response_model=AgentListResponse)
+async def get_agents():
+    agents = []
+    for name, cfg in AGENTS.items():
+        agents.append(AgentInfo(
+            name=name,
+            has_versions=cfg["has_versions"],
+            versions=list(cfg.get("versions", {}).keys()) if cfg["has_versions"] else [],
+        ))
+    return AgentListResponse(agents=agents)
 
 
 @router.get("/datasets", response_model=DatasetListResponse)
-async def get_datasets(search: str = Query("", description="Fuzzy search by name")):
-    rows = list_datasets(search=search, db_path=task_manager.db_path)
+async def get_datasets(
+    agent: str = Query("", description="Filter by agent"),
+    agent_version: str = Query("", description="Filter by agent version"),
+    search: str = Query("", description="Fuzzy search by name"),
+):
+    rows = list_datasets(
+        agent=agent, agent_version=agent_version,
+        search=search, db_path=task_manager.db_path,
+    )
     return DatasetListResponse(
         datasets=[
             DatasetSummary(
                 id=r["id"],
                 name=r["name"],
+                agent=r["agent"],
+                agent_version=r["agent_version"],
                 image_count=r["image_count"],
                 created_at=r["created_at"],
             )

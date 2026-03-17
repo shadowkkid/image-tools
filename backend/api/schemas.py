@@ -28,6 +28,8 @@ class LoginResponse(BaseModel):
 
 class CreateTaskRequest(BaseModel):
     task_name: str
+    agent: str
+    agent_version: str = ""
     dataset: str
     base_images: list[str]
     push_dir: str
@@ -57,6 +59,8 @@ class ImageDetail(BaseModel):
 class TaskSummary(BaseModel):
     task_id: str
     task_name: str
+    agent: str
+    agent_version: str
     dataset: str
     status: str
     total_images: int
@@ -69,6 +73,8 @@ class TaskSummary(BaseModel):
 class TaskDetail(BaseModel):
     task_id: str
     task_name: str
+    agent: str
+    agent_version: str
     dataset: str
     status: str
     deps_image: str
@@ -89,11 +95,29 @@ class TaskListResponse(BaseModel):
     tasks: list[TaskSummary]
 
 
+# ---- Agents ----
+
+class AgentVersion(BaseModel):
+    version: str
+
+
+class AgentInfo(BaseModel):
+    name: str
+    has_versions: bool
+    versions: list[str] = []
+
+
+class AgentListResponse(BaseModel):
+    agents: list[AgentInfo]
+
+
 # ---- Datasets ----
 
 class DatasetSummary(BaseModel):
     id: int
     name: str
+    agent: str
+    agent_version: str
     image_count: int
     created_at: str
 
@@ -115,7 +139,3 @@ class DatasetImageListResponse(BaseModel):
     total: int
     page: int
     page_size: int
-
-
-class ConfigResponse(BaseModel):
-    deps_image: str

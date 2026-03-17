@@ -54,6 +54,17 @@ export default function TaskList() {
       ),
     },
     {
+      title: 'Agent',
+      key: 'agent',
+      width: 160,
+      render: (_: unknown, record: TaskSummary) =>
+        record.agent
+          ? record.agent_version
+            ? `${record.agent} / ${record.agent_version}`
+            : record.agent
+          : '-',
+    },
+    {
       title: '数据集',
       dataIndex: 'dataset',
       key: 'dataset',

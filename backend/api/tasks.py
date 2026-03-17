@@ -15,15 +15,20 @@ router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
 @router.post("", response_model=TaskSummary, status_code=201)
 async def create_task(req: CreateTaskRequest):
-    task = await task_manager.create_task(
-        task_name=req.task_name,
-        dataset=req.dataset,
-        base_images=req.base_images,
-        push_dir=req.push_dir,
-        build_args=req.build_args,
-        retry_count=req.retry_count,
-        concurrency=req.concurrency,
-    )
+    try:
+        task = await task_manager.create_task(
+            task_name=req.task_name,
+            agent=req.agent,
+            agent_version=req.agent_version,
+            dataset=req.dataset,
+            base_images=req.base_images,
+            push_dir=req.push_dir,
+            build_args=req.build_args,
+            retry_count=req.retry_count,
+            concurrency=req.concurrency,
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     return _to_summary(task)
 
 
@@ -44,6 +49,8 @@ async def get_task(task_id: str):
     return TaskDetail(
         task_id=task.task_id,
         task_name=task.task_name,
+        agent=task.agent,
+        agent_version=task.agent_version,
         dataset=task.dataset,
         status=task.status.value,
         deps_image=task.deps_image,
@@ -73,6 +80,8 @@ def _to_summary(task) -> TaskSummary:
     return TaskSummary(
         task_id=task.task_id,
         task_name=task.task_name,
+        agent=task.agent,
+        agent_version=task.agent_version,
         dataset=task.dataset,
         status=task.status.value,
         total_images=task.total_images,

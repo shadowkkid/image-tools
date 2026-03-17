@@ -1,6 +1,5 @@
 import asyncio
 import logging
-import os
 import shutil
 from datetime import datetime
 
@@ -10,7 +9,7 @@ from backend.builder.image_builder import (
     _compute_target_image,
     prep_shared_build_context,
 )
-from backend.config import DEPS_IMAGE
+from backend.config import get_agent_config
 from backend.core.database import add_dataset_image, ensure_dataset, init_db, load_all_tasks, save_task
 from backend.core.docker_service import DockerService
 from backend.core.task_models import (
@@ -21,12 +20,6 @@ from backend.core.task_models import (
 )
 
 logger = logging.getLogger(__name__)
-
-# Default OpenHands source directory (configurable via environment variable)
-DEFAULT_SOURCE_DIR = os.environ.get(
-    "IMAGE_TOOLS_SOURCE_DIR",
-    "/home/SENSETIME/lizimu/workspace/python/OpenHands_Ss",
-)
 
 
 class TaskManager:
@@ -70,6 +63,8 @@ class TaskManager:
     async def create_task(
         self,
         task_name: str,
+        agent: str,
+        agent_version: str,
         dataset: str,
         base_images: list[str],
         push_dir: str,
@@ -78,18 +73,25 @@ class TaskManager:
         concurrency: int = 2,
     ) -> BuildTask:
         """Create a new build task and start execution in background."""
+        # Resolve agent config
+        agent_cfg = get_agent_config(agent, agent_version)
+        deps_image = agent_cfg["deps_image"]
+        source_dir = agent_cfg["source_dir"]
+
         # Ensure dataset exists
-        ensure_dataset(dataset, self.db_path)
+        ensure_dataset(dataset, agent, agent_version, self.db_path)
 
         task = BuildTask(
             task_name=task_name,
-            deps_image=DEPS_IMAGE,
+            deps_image=deps_image,
             push_dir=push_dir,
             base_images=base_images,
+            agent=agent,
+            agent_version=agent_version,
             dataset=dataset,
             build_args=build_args or [],
             retry_count=retry_count,
-            source_dir=DEFAULT_SOURCE_DIR,
+            source_dir=source_dir,
             concurrency=max(1, concurrency),
         )
 
@@ -283,7 +285,10 @@ class TaskManager:
         """Record successfully pushed image into its dataset."""
         if img.status == ImageBuildStatus.SUCCESS and task.dataset:
             try:
-                add_dataset_image(task.dataset, img.target_image, task.task_id, self.db_path)
+                add_dataset_image(
+                    task.dataset, img.target_image, task.task_id,
+                    task.agent, task.agent_version, self.db_path,
+                )
             except Exception as e:
                 logger.error(f"Failed to record dataset image: {e}")
 

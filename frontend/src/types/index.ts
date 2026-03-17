@@ -19,6 +19,8 @@ export interface ImageDetail {
 export interface TaskSummary {
   task_id: string;
   task_name: string;
+  agent: string;
+  agent_version: string;
   dataset: string;
   status: string;
   total_images: number;
@@ -31,6 +33,8 @@ export interface TaskSummary {
 export interface TaskDetailData {
   task_id: string;
   task_name: string;
+  agent: string;
+  agent_version: string;
   dataset: string;
   status: string;
   deps_image: string;
@@ -58,9 +62,17 @@ export interface LoginResponse {
   message: string;
 }
 
+export interface AgentInfo {
+  name: string;
+  has_versions: boolean;
+  versions: string[];
+}
+
 export interface DatasetSummary {
   id: number;
   name: string;
+  agent: string;
+  agent_version: string;
   image_count: number;
   created_at: string;
 }
@@ -71,8 +83,4 @@ export interface DatasetImageItem {
   task_id: string;
   task_name: string;
   created_at: string;
-}
-
-export interface ConfigData {
-  deps_image: string;
 }

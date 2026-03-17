@@ -22,17 +22,22 @@ def db_path(tmp_path):
 
 class TestEnsureDataset:
     def test_create_new_dataset(self, db_path):
-        ds_id = ensure_dataset("my-dataset", db_path)
+        ds_id = ensure_dataset("my-dataset", "OpenHands", "0.54.0", db_path)
         assert ds_id > 0
 
     def test_idempotent(self, db_path):
-        id1 = ensure_dataset("ds-1", db_path)
-        id2 = ensure_dataset("ds-1", db_path)
+        id1 = ensure_dataset("ds-1", "OpenHands", "0.54.0", db_path)
+        id2 = ensure_dataset("ds-1", "OpenHands", "0.54.0", db_path)
         assert id1 == id2
 
     def test_different_names_different_ids(self, db_path):
-        id1 = ensure_dataset("ds-a", db_path)
-        id2 = ensure_dataset("ds-b", db_path)
+        id1 = ensure_dataset("ds-a", "OpenHands", "0.54.0", db_path)
+        id2 = ensure_dataset("ds-b", "OpenHands", "0.54.0", db_path)
+        assert id1 != id2
+
+    def test_same_name_different_agent_different_ids(self, db_path):
+        id1 = ensure_dataset("ds-x", "OpenHands", "0.54.0", db_path)
+        id2 = ensure_dataset("ds-x", "OtherAgent", "", db_path)
         assert id1 != id2
 
 
@@ -44,6 +49,8 @@ class TestAddDatasetImage:
             deps_image="deps:v1",
             push_dir="reg/repo",
             base_images=["ubuntu:22.04"],
+            agent="OpenHands",
+            agent_version="0.54.0",
             dataset="ds-1",
         )
         task.images.append(
@@ -51,10 +58,10 @@ class TestAddDatasetImage:
         )
         save_task(task, db_path)
 
-        add_dataset_image("ds-1", "reg/repo/ubuntu:22.04", task.task_id, db_path)
+        add_dataset_image("ds-1", "reg/repo/ubuntu:22.04", task.task_id, "OpenHands", "0.54.0", db_path)
 
         rows, total = list_dataset_images(
-            ensure_dataset("ds-1", db_path), db_path=db_path
+            ensure_dataset("ds-1", "OpenHands", "0.54.0", db_path), db_path=db_path
         )
         assert total == 1
         assert rows[0]["image_name"] == "reg/repo/ubuntu:22.04"
@@ -66,6 +73,8 @@ class TestAddDatasetImage:
             deps_image="deps:v1",
             push_dir="reg/repo",
             base_images=["a:1", "b:2"],
+            agent="OpenHands",
+            agent_version="0.54.0",
             dataset="ds-2",
         )
         task.images = [
@@ -74,10 +83,10 @@ class TestAddDatasetImage:
         ]
         save_task(task, db_path)
 
-        add_dataset_image("ds-2", "reg/repo/a:1", task.task_id, db_path)
-        add_dataset_image("ds-2", "reg/repo/b:2", task.task_id, db_path)
+        add_dataset_image("ds-2", "reg/repo/a:1", task.task_id, "OpenHands", "0.54.0", db_path)
+        add_dataset_image("ds-2", "reg/repo/b:2", task.task_id, "OpenHands", "0.54.0", db_path)
 
-        ds_id = ensure_dataset("ds-2", db_path)
+        ds_id = ensure_dataset("ds-2", "OpenHands", "0.54.0", db_path)
         rows, total = list_dataset_images(ds_id, db_path=db_path)
         assert total == 2
 
@@ -93,6 +102,8 @@ class TestListDatasets:
             deps_image="deps:v1",
             push_dir="reg/repo",
             base_images=["a:1"],
+            agent="OpenHands",
+            agent_version="0.54.0",
             dataset="ds-count",
         )
         task.images.append(
@@ -100,8 +111,8 @@ class TestListDatasets:
         )
         save_task(task, db_path)
 
-        ensure_dataset("ds-count", db_path)
-        add_dataset_image("ds-count", "reg/repo/a:1", task.task_id, db_path)
+        ensure_dataset("ds-count", "OpenHands", "0.54.0", db_path)
+        add_dataset_image("ds-count", "reg/repo/a:1", task.task_id, "OpenHands", "0.54.0", db_path)
 
         result = list_datasets(db_path=db_path)
         assert len(result) == 1
@@ -109,9 +120,9 @@ class TestListDatasets:
         assert result[0]["image_count"] == 1
 
     def test_search_filter(self, db_path):
-        ensure_dataset("alpha-dataset", db_path)
-        ensure_dataset("beta-dataset", db_path)
-        ensure_dataset("gamma-other", db_path)
+        ensure_dataset("alpha-dataset", "OpenHands", "0.54.0", db_path)
+        ensure_dataset("beta-dataset", "OpenHands", "0.54.0", db_path)
+        ensure_dataset("gamma-other", "OpenHands", "0.54.0", db_path)
 
         result = list_datasets(search="dataset", db_path=db_path)
         assert len(result) == 2
@@ -119,8 +130,8 @@ class TestListDatasets:
         assert names == {"alpha-dataset", "beta-dataset"}
 
     def test_empty_search_returns_all(self, db_path):
-        ensure_dataset("ds-x", db_path)
-        ensure_dataset("ds-y", db_path)
+        ensure_dataset("ds-x", "OpenHands", "0.54.0", db_path)
+        ensure_dataset("ds-y", "OpenHands", "0.54.0", db_path)
 
         result = list_datasets(search="", db_path=db_path)
         assert len(result) == 2
@@ -133,6 +144,8 @@ class TestListDatasetImages:
             deps_image="deps:v1",
             push_dir="reg/repo",
             base_images=[f"img:{i}" for i in range(count)],
+            agent="OpenHands",
+            agent_version="0.54.0",
             dataset="paging-ds",
         )
         task.images = [
@@ -142,9 +155,9 @@ class TestListDatasetImages:
         save_task(task, db_path)
 
         for i in range(count):
-            add_dataset_image("paging-ds", f"reg/repo/img:{i}", task.task_id, db_path)
+            add_dataset_image("paging-ds", f"reg/repo/img:{i}", task.task_id, "OpenHands", "0.54.0", db_path)
 
-        return ensure_dataset("paging-ds", db_path)
+        return ensure_dataset("paging-ds", "OpenHands", "0.54.0", db_path)
 
     def test_pagination(self, db_path):
         ds_id = self._setup_dataset_with_images(db_path, count=5)
@@ -167,6 +180,8 @@ class TestListDatasetImages:
             deps_image="deps:v1",
             push_dir="reg/repo",
             base_images=["ubuntu:22.04", "alpine:3"],
+            agent="OpenHands",
+            agent_version="0.54.0",
             dataset="search-ds",
         )
         task.images = [
@@ -175,10 +190,10 @@ class TestListDatasetImages:
         ]
         save_task(task, db_path)
 
-        add_dataset_image("search-ds", "reg/repo/ubuntu:22.04", task.task_id, db_path)
-        add_dataset_image("search-ds", "reg/repo/alpine:3", task.task_id, db_path)
+        add_dataset_image("search-ds", "reg/repo/ubuntu:22.04", task.task_id, "OpenHands", "0.54.0", db_path)
+        add_dataset_image("search-ds", "reg/repo/alpine:3", task.task_id, "OpenHands", "0.54.0", db_path)
 
-        ds_id = ensure_dataset("search-ds", db_path)
+        ds_id = ensure_dataset("search-ds", "OpenHands", "0.54.0", db_path)
         rows, total = list_dataset_images(ds_id, search="ubuntu", db_path=db_path)
         assert total == 1
         assert rows[0]["image_name"] == "reg/repo/ubuntu:22.04"
@@ -186,7 +201,7 @@ class TestListDatasetImages:
 
 class TestGetDatasetById:
     def test_existing(self, db_path):
-        ds_id = ensure_dataset("existing-ds", db_path)
+        ds_id = ensure_dataset("existing-ds", "OpenHands", "0.54.0", db_path)
         result = get_dataset_by_id(ds_id, db_path)
         assert result is not None
         assert result["name"] == "existing-ds"
@@ -205,6 +220,8 @@ class TestDatasetFieldInTask:
             deps_image="deps:v1",
             push_dir="reg/repo",
             base_images=["a:1"],
+            agent="OpenHands",
+            agent_version="0.54.0",
             dataset="my-dataset",
         )
         task.images.append(
@@ -215,6 +232,8 @@ class TestDatasetFieldInTask:
         loaded = load_all_tasks(db_path)
         t = loaded[task.task_id]
         assert t.dataset == "my-dataset"
+        assert t.agent == "OpenHands"
+        assert t.agent_version == "0.54.0"
 
     def test_task_without_dataset(self, db_path):
         from backend.core.database import load_all_tasks
@@ -233,3 +252,5 @@ class TestDatasetFieldInTask:
         loaded = load_all_tasks(db_path)
         t = loaded[task.task_id]
         assert t.dataset == ""
+        assert t.agent == ""
+        assert t.agent_version == ""

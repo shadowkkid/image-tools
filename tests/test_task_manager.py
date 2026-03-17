@@ -94,6 +94,8 @@ class TestStopTask:
                 with patch("backend.core.task_manager.DockerService.prune_images", new_callable=AsyncMock):
                     task = await manager.create_task(
                         task_name="stop-test",
+                        agent="OpenHands",
+                        agent_version="0.54.0",
                         dataset="test-ds",
                         base_images=["ubuntu:22.04"],
                         push_dir="reg/repo",
@@ -126,6 +128,8 @@ class TestStopTask:
                 with patch("backend.core.task_manager.DockerService.prune_images", new_callable=AsyncMock):
                     task = await manager.create_task(
                         task_name="done-test",
+                        agent="OpenHands",
+                        agent_version="0.54.0",
                         dataset="test-ds",
                         base_images=["ubuntu:22.04"],
                         push_dir="reg/repo",
@@ -206,6 +210,8 @@ class TestTaskRestore:
                 with patch("backend.core.task_manager.DockerService.prune_images", new_callable=AsyncMock):
                     task = await manager.create_task(
                         task_name="persist-test",
+                        agent="OpenHands",
+                        agent_version="0.54.0",
                         dataset="test-ds",
                         base_images=["ubuntu:22.04"],
                         push_dir="reg/repo",
@@ -341,6 +347,8 @@ class TestImageRefCounting:
              patch.object(DockerService, "prune_images", new_callable=AsyncMock) as mock_prune:
             task = await manager.create_task(
                 task_name="cancel-cleanup-test",
+                agent="OpenHands",
+                agent_version="0.54.0",
                 dataset="test-ds",
                 base_images=["ubuntu:22.04"],
                 push_dir="reg/repo",

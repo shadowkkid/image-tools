@@ -16,7 +16,7 @@ export default function DatasetList() {
   const fetchDatasets = async (q: string = search) => {
     setLoading(true);
     try {
-      const res = await listDatasets(q);
+      const res = await listDatasets({ search: q });
       setDatasets(res.datasets);
     } finally {
       setLoading(false);
@@ -40,6 +40,17 @@ export default function DatasetList() {
       render: (text: string, record: DatasetSummary) => (
         <a onClick={() => navigate(`/datasets/${record.id}`)}>{text}</a>
       ),
+    },
+    {
+      title: 'Agent',
+      key: 'agent',
+      width: 160,
+      render: (_: unknown, record: DatasetSummary) =>
+        record.agent
+          ? record.agent_version
+            ? `${record.agent} / ${record.agent_version}`
+            : record.agent
+          : '-',
     },
     {
       title: '镜像数量',

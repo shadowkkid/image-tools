@@ -95,6 +95,8 @@ class BuildTask:
     deps_image: str
     push_dir: str
     base_images: list[str]
+    agent: str = ""
+    agent_version: str = ""
     dataset: str = ""
     build_args: list[str] = field(default_factory=list)
     retry_count: int = 0

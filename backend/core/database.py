@@ -61,7 +61,9 @@ def init_db(db_path: str | None = None) -> str:
                 status TEXT NOT NULL DEFAULT 'pending',
                 created_at TEXT NOT NULL,
                 finished_at TEXT,
-                dataset TEXT NOT NULL DEFAULT ''
+                dataset TEXT NOT NULL DEFAULT '',
+                agent TEXT NOT NULL DEFAULT '',
+                agent_version TEXT NOT NULL DEFAULT ''
             );
 
             CREATE TABLE IF NOT EXISTS images (
@@ -90,8 +92,11 @@ def init_db(db_path: str | None = None) -> str:
 
             CREATE TABLE IF NOT EXISTS datasets (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                name TEXT NOT NULL UNIQUE,
-                created_at TEXT NOT NULL
+                name TEXT NOT NULL,
+                agent TEXT NOT NULL DEFAULT '',
+                agent_version TEXT NOT NULL DEFAULT '',
+                created_at TEXT NOT NULL,
+                UNIQUE(name, agent, agent_version)
             );
 
             CREATE TABLE IF NOT EXISTS dataset_images (
@@ -105,10 +110,20 @@ def init_db(db_path: str | None = None) -> str:
             );
         """)
 
-        # Migration: add dataset column if missing (for existing databases)
-        cols = {row["name"] for row in conn.execute("PRAGMA table_info(tasks)").fetchall()}
-        if "dataset" not in cols:
+        # Migrations for existing databases
+        task_cols = {row["name"] for row in conn.execute("PRAGMA table_info(tasks)").fetchall()}
+        if "dataset" not in task_cols:
             conn.execute("ALTER TABLE tasks ADD COLUMN dataset TEXT NOT NULL DEFAULT ''")
+        if "agent" not in task_cols:
+            conn.execute("ALTER TABLE tasks ADD COLUMN agent TEXT NOT NULL DEFAULT ''")
+        if "agent_version" not in task_cols:
+            conn.execute("ALTER TABLE tasks ADD COLUMN agent_version TEXT NOT NULL DEFAULT ''")
+
+        ds_cols = {row["name"] for row in conn.execute("PRAGMA table_info(datasets)").fetchall()}
+        if "agent" not in ds_cols:
+            conn.execute("ALTER TABLE datasets ADD COLUMN agent TEXT NOT NULL DEFAULT ''")
+        if "agent_version" not in ds_cols:
+            conn.execute("ALTER TABLE datasets ADD COLUMN agent_version TEXT NOT NULL DEFAULT ''")
 
         conn.commit()
     finally:
@@ -130,8 +145,9 @@ def save_task(task: BuildTask, db_path: str | None = None) -> None:
         conn.execute(
             """INSERT INTO tasks
                (task_id, task_name, deps_image, push_dir, base_images, build_args,
-                retry_count, concurrency, source_dir, status, created_at, finished_at, dataset)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                retry_count, concurrency, source_dir, status, created_at, finished_at,
+                dataset, agent, agent_version)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 task.task_id,
                 task.task_name,
@@ -146,6 +162,8 @@ def save_task(task: BuildTask, db_path: str | None = None) -> None:
                 _dt_to_str(task.created_at),
                 _dt_to_str(task.finished_at),
                 task.dataset,
+                task.agent,
+                task.agent_version,
             ),
         )
 
@@ -206,6 +224,8 @@ def load_all_tasks(db_path: str | None = None) -> dict[str, BuildTask]:
                 deps_image=row["deps_image"],
                 push_dir=row["push_dir"],
                 base_images=json.loads(row["base_images"]),
+                agent=row["agent"] or "",
+                agent_version=row["agent_version"] or "",
                 dataset=row["dataset"] or "",
                 build_args=json.loads(row["build_args"]),
                 retry_count=row["retry_count"],
@@ -263,17 +283,22 @@ def load_all_tasks(db_path: str | None = None) -> dict[str, BuildTask]:
 
 # ---- Dataset operations ----
 
-def ensure_dataset(name: str, db_path: str | None = None) -> int:
-    """Get or create a dataset by name. Returns the dataset id."""
+def ensure_dataset(
+    name: str, agent: str = "", agent_version: str = "", db_path: str | None = None
+) -> int:
+    """Get or create a dataset by (name, agent, agent_version). Returns the dataset id."""
     db_path = db_path or _DEFAULT_DB_PATH
     conn = _get_connection(db_path)
     try:
-        row = conn.execute("SELECT id FROM datasets WHERE name = ?", (name,)).fetchone()
+        row = conn.execute(
+            "SELECT id FROM datasets WHERE name = ? AND agent = ? AND agent_version = ?",
+            (name, agent, agent_version),
+        ).fetchone()
         if row:
             return row["id"]
         cursor = conn.execute(
-            "INSERT INTO datasets (name, created_at) VALUES (?, ?)",
-            (name, _dt_to_str(datetime.now())),
+            "INSERT INTO datasets (name, agent, agent_version, created_at) VALUES (?, ?, ?, ?)",
+            (name, agent, agent_version, _dt_to_str(datetime.now())),
         )
         conn.commit()
         return cursor.lastrowid
@@ -282,11 +307,16 @@ def ensure_dataset(name: str, db_path: str | None = None) -> int:
 
 
 def add_dataset_image(
-    dataset_name: str, image_name: str, task_id: str, db_path: str | None = None
+    dataset_name: str,
+    image_name: str,
+    task_id: str,
+    agent: str = "",
+    agent_version: str = "",
+    db_path: str | None = None,
 ) -> None:
     """Add an image record to a dataset."""
     db_path = db_path or _DEFAULT_DB_PATH
-    dataset_id = ensure_dataset(dataset_name, db_path)
+    dataset_id = ensure_dataset(dataset_name, agent, agent_version, db_path)
     conn = _get_connection(db_path)
     try:
         conn.execute(
@@ -298,21 +328,34 @@ def add_dataset_image(
         conn.close()
 
 
-def list_datasets(search: str = "", db_path: str | None = None) -> list[dict]:
-    """List all datasets with image counts. Optionally filter by name."""
+def list_datasets(
+    agent: str = "",
+    agent_version: str = "",
+    search: str = "",
+    db_path: str | None = None,
+) -> list[dict]:
+    """List datasets with image counts, filtered by agent/version and optional name search."""
     db_path = db_path or _DEFAULT_DB_PATH
     if not os.path.exists(db_path):
         return []
     conn = _get_connection(db_path)
     try:
         query = """
-            SELECT d.id, d.name, d.created_at, COUNT(di.id) AS image_count
+            SELECT d.id, d.name, d.agent, d.agent_version, d.created_at,
+                   COUNT(di.id) AS image_count
             FROM datasets d
             LEFT JOIN dataset_images di ON d.id = di.dataset_id
+            WHERE 1=1
         """
         params: list = []
+        if agent:
+            query += " AND d.agent = ?"
+            params.append(agent)
+        if agent_version:
+            query += " AND d.agent_version = ?"
+            params.append(agent_version)
         if search:
-            query += " WHERE d.name LIKE ?"
+            query += " AND d.name LIKE ?"
             params.append(f"%{search}%")
         query += " GROUP BY d.id ORDER BY d.created_at DESC"
         return [dict(row) for row in conn.execute(query, params).fetchall()]
