@@ -9,6 +9,7 @@ import {
   message,
   Space,
 } from 'antd';
+import { ArrowLeftOutlined } from '@ant-design/icons';
 import { checkAuth, createTask } from '../api/client';
 import LoginModal from '../components/LoginModal';
 
@@ -68,7 +69,7 @@ export default function TaskCreate() {
 
     const res = await createTask({
       task_name: values.task_name as string,
-      deps_image: values.deps_image as string,
+      dataset: values.dataset as string,
       base_images: baseImages,
       push_dir: values.push_dir as string,
       build_args: buildArgs,
@@ -111,11 +112,12 @@ export default function TaskCreate() {
           </Form.Item>
 
           <Form.Item
-            label="Deps 镜像"
-            name="deps_image"
-            rules={[{ required: true, message: '请输入 deps 镜像地址' }]}
+            label="数据集"
+            name="dataset"
+            rules={[{ required: true, message: '请输入数据集名称' }]}
+            extra="构建成功的镜像将自动归入该数据集"
           >
-            <Input placeholder="例如: registry.sensecore.tech/ccr-sandbox-swe/openhands-deps:latest" />
+            <Input placeholder="例如: swe-bench-verified" />
           </Form.Item>
 
           <Form.Item
@@ -163,7 +165,9 @@ export default function TaskCreate() {
               <Button type="primary" onClick={handleSubmit} loading={loading}>
                 提交任务
               </Button>
-              <Button onClick={() => navigate('/tasks')}>返回列表</Button>
+              <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/tasks')}>
+                返回列表
+              </Button>
             </Space>
           </Form.Item>
         </Form>

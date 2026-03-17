@@ -1,9 +1,12 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { ConfigProvider, Layout, theme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
+import Home from './pages/Home';
 import TaskCreate from './pages/TaskCreate';
 import TaskList from './pages/TaskList';
 import TaskDetail from './pages/TaskDetail';
+import DatasetList from './pages/DatasetList';
+import DatasetDetail from './pages/DatasetDetail';
 import './App.css';
 
 const { Content } = Layout;
@@ -87,17 +90,19 @@ export default function App() {
           <header className="app-header">
             <span
               className="header-title"
-              onClick={() => (window.location.href = '/tasks')}
+              onClick={() => (window.location.href = '/')}
             >
               Image Tools
             </span>
           </header>
           <Content className="app-content">
             <Routes>
-              <Route path="/" element={<Navigate to="/tasks" replace />} />
+              <Route path="/" element={<Home />} />
               <Route path="/tasks" element={<TaskList />} />
               <Route path="/create" element={<TaskCreate />} />
               <Route path="/tasks/:taskId" element={<TaskDetail />} />
+              <Route path="/datasets" element={<DatasetList />} />
+              <Route path="/datasets/:datasetId" element={<DatasetDetail />} />
             </Routes>
           </Content>
         </Layout>

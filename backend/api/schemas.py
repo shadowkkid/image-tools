@@ -28,7 +28,7 @@ class LoginResponse(BaseModel):
 
 class CreateTaskRequest(BaseModel):
     task_name: str
-    deps_image: str
+    dataset: str
     base_images: list[str]
     push_dir: str
     build_args: list[str] = []
@@ -57,6 +57,7 @@ class ImageDetail(BaseModel):
 class TaskSummary(BaseModel):
     task_id: str
     task_name: str
+    dataset: str
     status: str
     total_images: int
     completed_images: int
@@ -68,6 +69,7 @@ class TaskSummary(BaseModel):
 class TaskDetail(BaseModel):
     task_id: str
     task_name: str
+    dataset: str
     status: str
     deps_image: str
     push_dir: str
@@ -85,3 +87,35 @@ class TaskDetail(BaseModel):
 
 class TaskListResponse(BaseModel):
     tasks: list[TaskSummary]
+
+
+# ---- Datasets ----
+
+class DatasetSummary(BaseModel):
+    id: int
+    name: str
+    image_count: int
+    created_at: str
+
+
+class DatasetListResponse(BaseModel):
+    datasets: list[DatasetSummary]
+
+
+class DatasetImageItem(BaseModel):
+    id: int
+    image_name: str
+    task_id: str
+    task_name: str
+    created_at: str
+
+
+class DatasetImageListResponse(BaseModel):
+    images: list[DatasetImageItem]
+    total: int
+    page: int
+    page_size: int
+
+
+class ConfigResponse(BaseModel):
+    deps_image: str

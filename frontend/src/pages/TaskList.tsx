@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, Table, Tag, Button, Space } from 'antd';
-import { PlusOutlined, ReloadOutlined } from '@ant-design/icons';
+import { PlusOutlined, ReloadOutlined, ArrowLeftOutlined } from '@ant-design/icons';
 import { listTasks } from '../api/client';
 import type { TaskSummary } from '../types';
 
@@ -54,6 +54,13 @@ export default function TaskList() {
       ),
     },
     {
+      title: '数据集',
+      dataIndex: 'dataset',
+      key: 'dataset',
+      width: 160,
+      render: (text: string) => text || '-',
+    },
+    {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
@@ -101,6 +108,9 @@ export default function TaskList() {
       title="构建任务列表"
       extra={
         <Space>
+          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/')}>
+            首页
+          </Button>
           <Button icon={<ReloadOutlined />} onClick={fetchTasks} loading={loading}>
             刷新
           </Button>

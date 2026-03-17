@@ -19,6 +19,7 @@ export interface ImageDetail {
 export interface TaskSummary {
   task_id: string;
   task_name: string;
+  dataset: string;
   status: string;
   total_images: number;
   completed_images: number;
@@ -30,6 +31,7 @@ export interface TaskSummary {
 export interface TaskDetailData {
   task_id: string;
   task_name: string;
+  dataset: string;
   status: string;
   deps_image: string;
   push_dir: string;
@@ -54,4 +56,23 @@ export interface CheckAuthResponse {
 export interface LoginResponse {
   success: boolean;
   message: string;
+}
+
+export interface DatasetSummary {
+  id: number;
+  name: string;
+  image_count: number;
+  created_at: string;
+}
+
+export interface DatasetImageItem {
+  id: number;
+  image_name: string;
+  task_id: string;
+  task_name: string;
+  created_at: string;
+}
+
+export interface ConfigData {
+  deps_image: string;
 }

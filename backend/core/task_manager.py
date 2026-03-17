@@ -10,7 +10,8 @@ from backend.builder.image_builder import (
     _compute_target_image,
     prep_shared_build_context,
 )
-from backend.core.database import init_db, load_all_tasks, save_task
+from backend.config import DEPS_IMAGE
+from backend.core.database import add_dataset_image, ensure_dataset, init_db, load_all_tasks, save_task
 from backend.core.docker_service import DockerService
 from backend.core.task_models import (
     BuildTask,
@@ -69,7 +70,7 @@ class TaskManager:
     async def create_task(
         self,
         task_name: str,
-        deps_image: str,
+        dataset: str,
         base_images: list[str],
         push_dir: str,
         build_args: list[str] | None = None,
@@ -77,11 +78,15 @@ class TaskManager:
         concurrency: int = 2,
     ) -> BuildTask:
         """Create a new build task and start execution in background."""
+        # Ensure dataset exists
+        ensure_dataset(dataset, self.db_path)
+
         task = BuildTask(
             task_name=task_name,
-            deps_image=deps_image,
+            deps_image=DEPS_IMAGE,
             push_dir=push_dir,
             base_images=base_images,
+            dataset=dataset,
             build_args=build_args or [],
             retry_count=retry_count,
             source_dir=DEFAULT_SOURCE_DIR,
@@ -198,6 +203,7 @@ class TaskManager:
                         )
                     finally:
                         self._save(task)
+                        self._record_dataset_image(task, image_info)
             else:
                 # Parallel execution with semaphore
                 sem = asyncio.Semaphore(task.concurrency)
@@ -214,6 +220,7 @@ class TaskManager:
                             )
                         finally:
                             self._save(task)
+                            self._record_dataset_image(task, img)
 
                 await asyncio.gather(
                     *(build_with_limit(img) for img in task.images)
@@ -271,6 +278,14 @@ class TaskManager:
             f"Task [{task.task_name}] finished: {task.status.value} "
             f"({task.completed_images}/{task.total_images} succeeded)"
         )
+
+    def _record_dataset_image(self, task: BuildTask, img: ImageBuildInfo) -> None:
+        """Record successfully pushed image into its dataset."""
+        if img.status == ImageBuildStatus.SUCCESS and task.dataset:
+            try:
+                add_dataset_image(task.dataset, img.target_image, task.task_id, self.db_path)
+            except Exception as e:
+                logger.error(f"Failed to record dataset image: {e}")
 
     def get_task(self, task_id: str) -> BuildTask | None:
         return self.tasks.get(task_id)

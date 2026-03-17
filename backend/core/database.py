@@ -60,7 +60,8 @@ def init_db(db_path: str | None = None) -> str:
                 source_dir TEXT NOT NULL DEFAULT '',
                 status TEXT NOT NULL DEFAULT 'pending',
                 created_at TEXT NOT NULL,
-                finished_at TEXT
+                finished_at TEXT,
+                dataset TEXT NOT NULL DEFAULT ''
             );
 
             CREATE TABLE IF NOT EXISTS images (
@@ -86,7 +87,29 @@ def init_db(db_path: str | None = None) -> str:
                 finished_at TEXT,
                 FOREIGN KEY (image_id) REFERENCES images(id) ON DELETE CASCADE
             );
+
+            CREATE TABLE IF NOT EXISTS datasets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                created_at TEXT NOT NULL
+            );
+
+            CREATE TABLE IF NOT EXISTS dataset_images (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                dataset_id INTEGER NOT NULL,
+                image_name TEXT NOT NULL,
+                task_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY (dataset_id) REFERENCES datasets(id) ON DELETE CASCADE,
+                FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE
+            );
         """)
+
+        # Migration: add dataset column if missing (for existing databases)
+        cols = {row["name"] for row in conn.execute("PRAGMA table_info(tasks)").fetchall()}
+        if "dataset" not in cols:
+            conn.execute("ALTER TABLE tasks ADD COLUMN dataset TEXT NOT NULL DEFAULT ''")
+
         conn.commit()
     finally:
         conn.close()
@@ -107,8 +130,8 @@ def save_task(task: BuildTask, db_path: str | None = None) -> None:
         conn.execute(
             """INSERT INTO tasks
                (task_id, task_name, deps_image, push_dir, base_images, build_args,
-                retry_count, concurrency, source_dir, status, created_at, finished_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                retry_count, concurrency, source_dir, status, created_at, finished_at, dataset)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 task.task_id,
                 task.task_name,
@@ -122,6 +145,7 @@ def save_task(task: BuildTask, db_path: str | None = None) -> None:
                 task.status.value,
                 _dt_to_str(task.created_at),
                 _dt_to_str(task.finished_at),
+                task.dataset,
             ),
         )
 
@@ -182,6 +206,7 @@ def load_all_tasks(db_path: str | None = None) -> dict[str, BuildTask]:
                 deps_image=row["deps_image"],
                 push_dir=row["push_dir"],
                 base_images=json.loads(row["base_images"]),
+                dataset=row["dataset"] or "",
                 build_args=json.loads(row["build_args"]),
                 retry_count=row["retry_count"],
                 concurrency=row["concurrency"],
@@ -232,5 +257,110 @@ def load_all_tasks(db_path: str | None = None) -> dict[str, BuildTask]:
             tasks[task.task_id] = task
 
         return tasks
+    finally:
+        conn.close()
+
+
+# ---- Dataset operations ----
+
+def ensure_dataset(name: str, db_path: str | None = None) -> int:
+    """Get or create a dataset by name. Returns the dataset id."""
+    db_path = db_path or _DEFAULT_DB_PATH
+    conn = _get_connection(db_path)
+    try:
+        row = conn.execute("SELECT id FROM datasets WHERE name = ?", (name,)).fetchone()
+        if row:
+            return row["id"]
+        cursor = conn.execute(
+            "INSERT INTO datasets (name, created_at) VALUES (?, ?)",
+            (name, _dt_to_str(datetime.now())),
+        )
+        conn.commit()
+        return cursor.lastrowid
+    finally:
+        conn.close()
+
+
+def add_dataset_image(
+    dataset_name: str, image_name: str, task_id: str, db_path: str | None = None
+) -> None:
+    """Add an image record to a dataset."""
+    db_path = db_path or _DEFAULT_DB_PATH
+    dataset_id = ensure_dataset(dataset_name, db_path)
+    conn = _get_connection(db_path)
+    try:
+        conn.execute(
+            "INSERT INTO dataset_images (dataset_id, image_name, task_id, created_at) VALUES (?, ?, ?, ?)",
+            (dataset_id, image_name, task_id, _dt_to_str(datetime.now())),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def list_datasets(search: str = "", db_path: str | None = None) -> list[dict]:
+    """List all datasets with image counts. Optionally filter by name."""
+    db_path = db_path or _DEFAULT_DB_PATH
+    if not os.path.exists(db_path):
+        return []
+    conn = _get_connection(db_path)
+    try:
+        query = """
+            SELECT d.id, d.name, d.created_at, COUNT(di.id) AS image_count
+            FROM datasets d
+            LEFT JOIN dataset_images di ON d.id = di.dataset_id
+        """
+        params: list = []
+        if search:
+            query += " WHERE d.name LIKE ?"
+            params.append(f"%{search}%")
+        query += " GROUP BY d.id ORDER BY d.created_at DESC"
+        return [dict(row) for row in conn.execute(query, params).fetchall()]
+    finally:
+        conn.close()
+
+
+def list_dataset_images(
+    dataset_id: int,
+    search: str = "",
+    page: int = 1,
+    page_size: int = 50,
+    db_path: str | None = None,
+) -> tuple[list[dict], int]:
+    """List images in a dataset with pagination. Returns (rows, total_count)."""
+    db_path = db_path or _DEFAULT_DB_PATH
+    conn = _get_connection(db_path)
+    try:
+        base = """
+            FROM dataset_images di
+            JOIN tasks t ON di.task_id = t.task_id
+            WHERE di.dataset_id = ?
+        """
+        params: list = [dataset_id]
+        if search:
+            base += " AND di.image_name LIKE ?"
+            params.append(f"%{search}%")
+
+        total = conn.execute(f"SELECT COUNT(*) AS cnt {base}", params).fetchone()["cnt"]
+
+        offset = (page - 1) * page_size
+        rows = conn.execute(
+            f"SELECT di.id, di.image_name, di.task_id, t.task_name, di.created_at {base} ORDER BY di.created_at DESC LIMIT ? OFFSET ?",
+            params + [page_size, offset],
+        ).fetchall()
+        return [dict(r) for r in rows], total
+    finally:
+        conn.close()
+
+
+def get_dataset_by_id(dataset_id: int, db_path: str | None = None) -> dict | None:
+    """Get a single dataset by id."""
+    db_path = db_path or _DEFAULT_DB_PATH
+    if not os.path.exists(db_path):
+        return None
+    conn = _get_connection(db_path)
+    try:
+        row = conn.execute("SELECT * FROM datasets WHERE id = ?", (dataset_id,)).fetchone()
+        return dict(row) if row else None
     finally:
         conn.close()

@@ -5,6 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
+from backend.api.datasets import router as datasets_router
 from backend.api.registry import router as registry_router
 from backend.api.tasks import router as tasks_router
 
@@ -23,6 +24,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(datasets_router)
 app.include_router(registry_router)
 app.include_router(tasks_router)
 

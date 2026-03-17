@@ -4,9 +4,18 @@ import type {
   TaskDetailData,
   CheckAuthResponse,
   LoginResponse,
+  DatasetSummary,
+  DatasetImageItem,
+  ConfigData,
 } from '../types';
 
 const api = axios.create({ baseURL: '/api' });
+
+// Config
+export async function getConfig(): Promise<ConfigData> {
+  const { data } = await api.get('/config');
+  return data;
+}
 
 // Registry
 export async function checkAuth(registry: string): Promise<CheckAuthResponse> {
@@ -30,7 +39,7 @@ export async function dockerLogin(
 // Tasks
 export interface CreateTaskParams {
   task_name: string;
-  deps_image: string;
+  dataset: string;
   base_images: string[];
   push_dir: string;
   build_args?: string[];
@@ -55,5 +64,19 @@ export async function getTask(taskId: string): Promise<TaskDetailData> {
 
 export async function stopTask(taskId: string): Promise<{ success: boolean; message: string }> {
   const { data } = await api.post(`/tasks/${taskId}/stop`);
+  return data;
+}
+
+// Datasets
+export async function listDatasets(search: string = ''): Promise<{ datasets: DatasetSummary[] }> {
+  const { data } = await api.get('/datasets', { params: { search } });
+  return data;
+}
+
+export async function getDatasetImages(
+  datasetId: number,
+  params: { search?: string; page?: number; page_size?: number } = {}
+): Promise<{ images: DatasetImageItem[]; total: number; page: number; page_size: number }> {
+  const { data } = await api.get(`/datasets/${datasetId}/images`, { params });
   return data;
 }

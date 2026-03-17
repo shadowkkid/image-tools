@@ -45,6 +45,16 @@
   border-color: rgba(255, 255, 255, 0.10) !important;
 }
 
+/* Home entry card */
+.home-entry-card {
+  cursor: pointer;
+  transition: border-color 0.2s ease, transform 0.15s ease;
+}
+.home-entry-card:hover {
+  border-color: rgba(124, 92, 252, 0.3) !important;
+  transform: translateY(-2px);
+}
+
 /* Code */
 code {
   background: rgba(124, 92, 252, 0.1);

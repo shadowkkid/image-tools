@@ -17,7 +17,7 @@ router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 async def create_task(req: CreateTaskRequest):
     task = await task_manager.create_task(
         task_name=req.task_name,
-        deps_image=req.deps_image,
+        dataset=req.dataset,
         base_images=req.base_images,
         push_dir=req.push_dir,
         build_args=req.build_args,
@@ -44,6 +44,7 @@ async def get_task(task_id: str):
     return TaskDetail(
         task_id=task.task_id,
         task_name=task.task_name,
+        dataset=task.dataset,
         status=task.status.value,
         deps_image=task.deps_image,
         push_dir=task.push_dir,
@@ -72,6 +73,7 @@ def _to_summary(task) -> TaskSummary:
     return TaskSummary(
         task_id=task.task_id,
         task_name=task.task_name,
+        dataset=task.dataset,
         status=task.status.value,
         total_images=task.total_images,
         completed_images=task.completed_images,
