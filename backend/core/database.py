@@ -134,38 +134,63 @@ def init_db(db_path: str | None = None) -> str:
 
 
 def save_task(task: BuildTask, db_path: str | None = None) -> None:
-    """Save a task and its images/stages to the database (DELETE + INSERT)."""
+    """Save a task and its images/stages to the database.
+
+    Uses INSERT OR REPLACE for the tasks row to avoid triggering ON DELETE CASCADE,
+    which would wipe dataset_images linked to this task.
+    """
     db_path = db_path or _DEFAULT_DB_PATH
     conn = _get_connection(db_path)
     try:
-        # Delete existing data for this task (cascade deletes images and stages)
-        conn.execute("DELETE FROM tasks WHERE task_id = ?", (task.task_id,))
-
-        # Insert task
+        # Manually delete child tables (stages → images) without touching the tasks row,
+        # so that ON DELETE CASCADE on tasks does NOT fire against dataset_images.
         conn.execute(
-            """INSERT INTO tasks
-               (task_id, task_name, deps_image, push_dir, base_images, build_args,
-                retry_count, concurrency, source_dir, status, created_at, finished_at,
-                dataset, agent, agent_version)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                task.task_id,
-                task.task_name,
-                task.deps_image,
-                task.push_dir,
-                json.dumps(task.base_images),
-                json.dumps(task.build_args),
-                task.retry_count,
-                task.concurrency,
-                task.source_dir,
-                task.status.value,
-                _dt_to_str(task.created_at),
-                _dt_to_str(task.finished_at),
-                task.dataset,
-                task.agent,
-                task.agent_version,
-            ),
+            """DELETE FROM stages WHERE image_id IN (
+                   SELECT id FROM images WHERE task_id = ?
+               )""",
+            (task.task_id,),
         )
+        conn.execute("DELETE FROM images WHERE task_id = ?", (task.task_id,))
+
+        # Upsert the tasks row — use UPDATE if exists, INSERT if new.
+        # INSERT OR REPLACE would trigger ON DELETE CASCADE in SQLite, so we avoid it.
+        existing = conn.execute(
+            "SELECT 1 FROM tasks WHERE task_id = ?", (task.task_id,)
+        ).fetchone()
+        task_params = (
+            task.task_name,
+            task.deps_image,
+            task.push_dir,
+            json.dumps(task.base_images),
+            json.dumps(task.build_args),
+            task.retry_count,
+            task.concurrency,
+            task.source_dir,
+            task.status.value,
+            _dt_to_str(task.created_at),
+            _dt_to_str(task.finished_at),
+            task.dataset,
+            task.agent,
+            task.agent_version,
+        )
+        if existing:
+            conn.execute(
+                """UPDATE tasks SET
+                       task_name=?, deps_image=?, push_dir=?, base_images=?, build_args=?,
+                       retry_count=?, concurrency=?, source_dir=?, status=?, created_at=?,
+                       finished_at=?, dataset=?, agent=?, agent_version=?
+                   WHERE task_id = ?""",
+                task_params + (task.task_id,),
+            )
+        else:
+            conn.execute(
+                """INSERT INTO tasks
+                   (task_name, deps_image, push_dir, base_images, build_args,
+                    retry_count, concurrency, source_dir, status, created_at,
+                    finished_at, dataset, agent, agent_version, task_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                task_params + (task.task_id,),
+            )
 
         # Insert images and stages
         for img in task.images:
@@ -319,6 +344,12 @@ def add_dataset_image(
     dataset_id = ensure_dataset(dataset_name, agent, agent_version, db_path)
     conn = _get_connection(db_path)
     try:
+        existing = conn.execute(
+            "SELECT 1 FROM dataset_images WHERE dataset_id = ? AND image_name = ? AND task_id = ?",
+            (dataset_id, image_name, task_id),
+        ).fetchone()
+        if existing:
+            return
         conn.execute(
             "INSERT INTO dataset_images (dataset_id, image_name, task_id, created_at) VALUES (?, ?, ?, ?)",
             (dataset_id, image_name, task_id, _dt_to_str(datetime.now())),

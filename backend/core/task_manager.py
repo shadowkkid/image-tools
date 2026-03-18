@@ -53,6 +53,14 @@ class TaskManager:
                 save_task(task, self.db_path)
         logger.info(f"Restored {len(self.tasks)} tasks from database")
 
+        # Back-fill missing dataset_images for completed successful images
+        for task in self.tasks.values():
+            if not task.dataset:
+                continue
+            for img in task.images:
+                if img.status == ImageBuildStatus.SUCCESS:
+                    self._record_dataset_image(task, img)
+
     def _save(self, task: BuildTask) -> None:
         """Persist task state to DB."""
         try:

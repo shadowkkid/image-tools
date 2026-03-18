@@ -3,7 +3,7 @@ from datetime import datetime
 
 import pytest
 
-from backend.core.database import init_db, load_all_tasks, save_task, delete_task
+from backend.core.database import init_db, load_all_tasks, save_task, delete_task, add_dataset_image, ensure_dataset, list_dataset_images
 from backend.core.task_models import (
     BuildTask,
     ImageBuildInfo,
@@ -267,3 +267,128 @@ class TestDeleteTask:
         delete_task(task.task_id, db_path)
         loaded = load_all_tasks(db_path)
         assert task.task_id not in loaded
+
+
+class TestSaveTaskPreservesDatasetImages:
+    """Verify that save_task does NOT cascade-delete dataset_images."""
+
+    def test_save_task_does_not_delete_dataset_images(self, db_path):
+        task = BuildTask(
+            task_name="cascade-safe",
+            deps_image="deps:v1",
+            push_dir="reg/repo",
+            base_images=["ubuntu:22.04"],
+            agent="OpenHands",
+            agent_version="0.54.0",
+            dataset="ds-safe",
+        )
+        task.images.append(
+            ImageBuildInfo(
+                base_image="ubuntu:22.04",
+                target_image="reg/repo/ubuntu:22.04",
+                status=ImageBuildStatus.SUCCESS,
+            )
+        )
+        save_task(task, db_path)
+
+        # Record a dataset image (simulates what _record_dataset_image does)
+        add_dataset_image(
+            "ds-safe", "reg/repo/ubuntu:22.04", task.task_id,
+            "OpenHands", "0.54.0", db_path,
+        )
+
+        ds_id = ensure_dataset("ds-safe", "OpenHands", "0.54.0", db_path)
+        rows, total = list_dataset_images(ds_id, db_path=db_path)
+        assert total == 1
+
+        # Now call save_task again (simulates periodic status updates during build)
+        task.status = TaskStatus.COMPLETED
+        save_task(task, db_path)
+
+        # dataset_images must still exist
+        rows, total = list_dataset_images(ds_id, db_path=db_path)
+        assert total == 1
+        assert rows[0]["image_name"] == "reg/repo/ubuntu:22.04"
+
+    def test_save_task_multiple_times_preserves_all_dataset_images(self, db_path):
+        task = BuildTask(
+            task_name="multi-save",
+            deps_image="deps:v1",
+            push_dir="reg/repo",
+            base_images=["a:1", "b:2"],
+            agent="OpenHands",
+            agent_version="0.54.0",
+            dataset="ds-multi",
+        )
+        task.images = [
+            ImageBuildInfo(
+                base_image="a:1",
+                target_image="reg/repo/a:1",
+                status=ImageBuildStatus.SUCCESS,
+            ),
+            ImageBuildInfo(
+                base_image="b:2",
+                target_image="reg/repo/b:2",
+                status=ImageBuildStatus.SUCCESS,
+            ),
+        ]
+        save_task(task, db_path)
+
+        add_dataset_image("ds-multi", "reg/repo/a:1", task.task_id, "OpenHands", "0.54.0", db_path)
+        save_task(task, db_path)  # save after first image recorded
+
+        add_dataset_image("ds-multi", "reg/repo/b:2", task.task_id, "OpenHands", "0.54.0", db_path)
+        save_task(task, db_path)  # save after second image recorded
+
+        ds_id = ensure_dataset("ds-multi", "OpenHands", "0.54.0", db_path)
+        rows, total = list_dataset_images(ds_id, db_path=db_path)
+        assert total == 2
+
+
+class TestAddDatasetImageDedup:
+    """Verify that add_dataset_image skips duplicates."""
+
+    def test_duplicate_insert_is_skipped(self, db_path):
+        task = BuildTask(
+            task_name="dedup",
+            deps_image="deps:v1",
+            push_dir="reg/repo",
+            base_images=["ubuntu:22.04"],
+            agent="OpenHands",
+            agent_version="0.54.0",
+            dataset="ds-dedup",
+        )
+        task.images.append(
+            ImageBuildInfo(base_image="ubuntu:22.04", target_image="reg/repo/ubuntu:22.04")
+        )
+        save_task(task, db_path)
+
+        add_dataset_image("ds-dedup", "reg/repo/ubuntu:22.04", task.task_id, "OpenHands", "0.54.0", db_path)
+        add_dataset_image("ds-dedup", "reg/repo/ubuntu:22.04", task.task_id, "OpenHands", "0.54.0", db_path)
+
+        ds_id = ensure_dataset("ds-dedup", "OpenHands", "0.54.0", db_path)
+        rows, total = list_dataset_images(ds_id, db_path=db_path)
+        assert total == 1
+
+    def test_different_images_not_deduped(self, db_path):
+        task = BuildTask(
+            task_name="no-dedup",
+            deps_image="deps:v1",
+            push_dir="reg/repo",
+            base_images=["a:1", "b:2"],
+            agent="OpenHands",
+            agent_version="0.54.0",
+            dataset="ds-no-dedup",
+        )
+        task.images = [
+            ImageBuildInfo(base_image="a:1", target_image="reg/repo/a:1"),
+            ImageBuildInfo(base_image="b:2", target_image="reg/repo/b:2"),
+        ]
+        save_task(task, db_path)
+
+        add_dataset_image("ds-no-dedup", "reg/repo/a:1", task.task_id, "OpenHands", "0.54.0", db_path)
+        add_dataset_image("ds-no-dedup", "reg/repo/b:2", task.task_id, "OpenHands", "0.54.0", db_path)
+
+        ds_id = ensure_dataset("ds-no-dedup", "OpenHands", "0.54.0", db_path)
+        rows, total = list_dataset_images(ds_id, db_path=db_path)
+        assert total == 2
