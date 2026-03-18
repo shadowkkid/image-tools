@@ -268,8 +268,42 @@ class TestDeleteTask:
         loaded = load_all_tasks(db_path)
         assert task.task_id not in loaded
 
+    def test_delete_task_preserves_dataset_images(self, db_path):
+        task = BuildTask(
+            task_name="del-preserve",
+            deps_image="deps:v1",
+            push_dir="reg/repo",
+            base_images=["ubuntu:22.04"],
+            agent="OpenHands",
+            agent_version="0.54.0",
+            dataset="ds-preserve",
+            status=TaskStatus.COMPLETED,
+        )
+        task.images.append(
+            ImageBuildInfo(
+                base_image="ubuntu:22.04",
+                target_image="reg/repo/ubuntu:22.04",
+                status=ImageBuildStatus.SUCCESS,
+            )
+        )
+        save_task(task, db_path)
 
-class TestSaveTaskPreservesDatasetImages:
+        add_dataset_image(
+            "ds-preserve", "reg/repo/ubuntu:22.04", task.task_id,
+            "OpenHands", "0.54.0", db_path,
+        )
+        ds_id = ensure_dataset("ds-preserve", "OpenHands", "0.54.0", db_path)
+        _, total_before = list_dataset_images(ds_id, db_path=db_path)
+        assert total_before == 1
+
+        # Delete the task
+        delete_task(task.task_id, db_path)
+
+        # dataset_images must still exist
+        rows, total_after = list_dataset_images(ds_id, db_path=db_path)
+        assert total_after == 1
+        assert rows[0]["image_name"] == "reg/repo/ubuntu:22.04"
+        assert rows[0]["task_name"] is None  # task was deleted
     """Verify that save_task does NOT cascade-delete dataset_images."""
 
     def test_save_task_does_not_delete_dataset_images(self, db_path):

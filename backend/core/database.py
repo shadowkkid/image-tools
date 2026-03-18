@@ -407,7 +407,7 @@ def list_dataset_images(
     try:
         base = """
             FROM dataset_images di
-            JOIN tasks t ON di.task_id = t.task_id
+            LEFT JOIN tasks t ON di.task_id = t.task_id
             WHERE di.dataset_id = ?
         """
         params: list = [dataset_id]
@@ -428,11 +428,22 @@ def list_dataset_images(
 
 
 def delete_task(task_id: str, db_path: str | None = None) -> bool:
-    """Delete a task by task_id. Returns True if a row was deleted."""
+    """Delete a task by task_id. Preserves dataset_images records."""
     db_path = db_path or _DEFAULT_DB_PATH
     conn = _get_connection(db_path)
     try:
+        # Temporarily disable FK enforcement so CASCADE doesn't wipe dataset_images.
+        # We manually clean up images/stages which are build-time data.
+        conn.execute("PRAGMA foreign_keys=OFF")
+        conn.execute(
+            """DELETE FROM stages WHERE image_id IN (
+                   SELECT id FROM images WHERE task_id = ?
+               )""",
+            (task_id,),
+        )
+        conn.execute("DELETE FROM images WHERE task_id = ?", (task_id,))
         cursor = conn.execute("DELETE FROM tasks WHERE task_id = ?", (task_id,))
+        conn.execute("PRAGMA foreign_keys=ON")
         conn.commit()
         return cursor.rowcount > 0
     finally:
