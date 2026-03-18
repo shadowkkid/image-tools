@@ -13,8 +13,8 @@ import {
   Modal,
   message,
 } from 'antd';
-import { ArrowLeftOutlined, ReloadOutlined, StopOutlined, CopyOutlined } from '@ant-design/icons';
-import { getTask, stopTask } from '../api/client';
+import { ArrowLeftOutlined, ReloadOutlined, StopOutlined, CopyOutlined, RedoOutlined } from '@ant-design/icons';
+import { getTask, stopTask, exportFailedImages } from '../api/client';
 import type { TaskDetailData, ImageDetail, StageDetail } from '../types';
 
 const statusColorMap: Record<string, string> = {
@@ -128,6 +128,27 @@ export default function TaskDetail() {
     navigate('/create', { state: cloneData });
   };
 
+  const handleRetryFailed = async () => {
+    try {
+      const res = await exportFailedImages(taskId!);
+      navigate('/create', {
+        state: {
+          task_name: res.task_name,
+          agent: res.agent,
+          agent_version: res.agent_version,
+          dataset: res.dataset,
+          push_dir: res.push_dir,
+          base_images: res.base_images.join('\n'),
+          build_args: res.build_args.join('\n'),
+          retry_count: res.retry_count,
+          concurrency: res.concurrency,
+        },
+      });
+    } catch {
+      message.error('导出失败镜像失败');
+    }
+  };
+
   const expandedRowRender = (record: ImageDetail) => (
     <div style={{ padding: '8px 0' }}>
       <Steps
@@ -222,6 +243,11 @@ export default function TaskDetail() {
         <Button icon={<CopyOutlined />} onClick={handleClone}>
           复制任务
         </Button>
+        {!isRunning && task.failed_images > 0 && (
+          <Button icon={<RedoOutlined />} onClick={handleRetryFailed}>
+            重试失败镜像
+          </Button>
+        )}
         {isRunning && <Tag color="processing">任务运行中，自动刷新</Tag>}
       </Space>
 

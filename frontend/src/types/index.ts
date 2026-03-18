@@ -84,3 +84,15 @@ export interface DatasetImageItem {
   task_name: string;
   created_at: string;
 }
+
+export interface ExportFailedImagesResponse {
+  task_name: string;
+  agent: string;
+  agent_version: string;
+  dataset: string;
+  base_images: string[];
+  push_dir: string;
+  build_args: string[];
+  retry_count: number;
+  concurrency: number;
+}

@@ -7,6 +7,7 @@ import type {
   AgentInfo,
   DatasetSummary,
   DatasetImageItem,
+  ExportFailedImagesResponse,
 } from '../types';
 
 const api = axios.create({ baseURL: '/api' });
@@ -88,6 +89,11 @@ export async function getDatasetImages(
 // Delete operations
 export async function deleteTask(taskId: string): Promise<{ success: boolean; message: string }> {
   const { data } = await api.delete(`/tasks/${taskId}`);
+  return data;
+}
+
+export async function exportFailedImages(taskId: string): Promise<ExportFailedImagesResponse> {
+  const { data } = await api.get(`/tasks/${taskId}/failed-images`);
   return data;
 }
 
