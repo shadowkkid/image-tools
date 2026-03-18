@@ -39,4 +39,22 @@ class TestDockerfileGenerator:
         )
         # Non-ubuntu images should get system deps
         assert "apt-get update" in result
+        # libgl1-mesa-glx with fallback to libgl1
         assert "libgl1-mesa-glx" in result
+        assert "libgl1" in result
+
+    def test_generate_non_ubuntu_libgl_fallback(self):
+        """libgl1-mesa-glx should fall back to libgl1 for Debian 13+ compatibility."""
+        result = self.gen.generate(
+            base_image="swerebenchv2/aio-libs-aiohttp:7869-3a21134",
+            deps_image="registry.example.com/deps:latest",
+        )
+        assert "apt-get install -y --no-install-recommends libgl1-mesa-glx" in result
+        assert "apt-get install -y --no-install-recommends libgl1 " in result
+
+    def test_generate_mswebench_skips_system_deps(self):
+        result = self.gen.generate(
+            base_image="mswebench/some-image:latest",
+            deps_image="registry.example.com/deps:latest",
+        )
+        assert "libgl1-mesa-glx" not in result
