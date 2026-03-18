@@ -24,8 +24,9 @@ def db_path(tmp_path):
 
 
 def _make_manager(db_path):
-    """Create a TaskManager with a temporary DB and mocked prune."""
-    with patch("backend.core.task_manager.DockerService.prune_images", new_callable=AsyncMock):
+    """Create a TaskManager with a temporary DB and mocked external calls."""
+    with patch("backend.core.task_manager.DockerService.prune_images", new_callable=AsyncMock), \
+         patch("backend.core.task_manager.DockerService.manifest_exists", return_value=False):
         return TaskManager(db_path=db_path)
 
 
@@ -143,7 +144,8 @@ class TestStopTask:
 
 class TestTaskRestore:
     def test_restore_running_task_marked_as_failed(self, db_path):
-        """Tasks that were running when server stopped should be marked as failed."""
+        """Tasks that were running when server stopped should be marked as failed
+        if images are not in the registry."""
         task = BuildTask(
             task_name="interrupted",
             deps_image="deps:latest",
@@ -160,7 +162,7 @@ class TestTaskRestore:
         )
         save_task(task, db_path)
 
-        # Create a new manager which triggers restore
+        # manifest_exists returns False (default in _make_manager) -> marked as failed
         manager = _make_manager(db_path)
 
         restored = manager.get_task(task.task_id)
@@ -169,6 +171,69 @@ class TestTaskRestore:
         assert restored.finished_at is not None
         assert restored.images[0].status == ImageBuildStatus.FAILED
         assert "Server restarted" in restored.images[0].error_message
+
+    def test_restore_recovers_images_from_registry(self, db_path):
+        """BUILDING images that exist in the registry should be recovered as SUCCESS."""
+        task = BuildTask(
+            task_name="recoverable",
+            deps_image="deps:latest",
+            push_dir="reg/repo",
+            base_images=["a:1", "b:2"],
+            status=TaskStatus.RUNNING,
+        )
+        task.images = [
+            ImageBuildInfo(
+                base_image="a:1",
+                target_image="reg/repo/a:1",
+                status=ImageBuildStatus.BUILDING,
+            ),
+            ImageBuildInfo(
+                base_image="b:2",
+                target_image="reg/repo/b:2",
+                status=ImageBuildStatus.BUILDING,
+            ),
+        ]
+        save_task(task, db_path)
+
+        # a:1 exists in registry, b:2 does not
+        def mock_manifest(image):
+            return image == "reg/repo/a:1"
+
+        with patch("backend.core.task_manager.DockerService.prune_images", new_callable=AsyncMock), \
+             patch("backend.core.task_manager.DockerService.manifest_exists", side_effect=mock_manifest):
+            manager = TaskManager(db_path=db_path)
+
+        restored = manager.get_task(task.task_id)
+        assert restored.status == TaskStatus.PARTIAL_FAILED
+        assert restored.images[0].status == ImageBuildStatus.SUCCESS
+        assert restored.images[0].error_message is None
+        assert restored.images[1].status == ImageBuildStatus.FAILED
+
+    def test_restore_all_recovered_marks_completed(self, db_path):
+        """If all BUILDING images are recovered from registry, task should be COMPLETED."""
+        task = BuildTask(
+            task_name="all-recovered",
+            deps_image="deps:latest",
+            push_dir="reg/repo",
+            base_images=["a:1"],
+            status=TaskStatus.RUNNING,
+        )
+        task.images = [
+            ImageBuildInfo(
+                base_image="a:1",
+                target_image="reg/repo/a:1",
+                status=ImageBuildStatus.BUILDING,
+            ),
+        ]
+        save_task(task, db_path)
+
+        with patch("backend.core.task_manager.DockerService.prune_images", new_callable=AsyncMock), \
+             patch("backend.core.task_manager.DockerService.manifest_exists", return_value=True):
+            manager = TaskManager(db_path=db_path)
+
+        restored = manager.get_task(task.task_id)
+        assert restored.status == TaskStatus.COMPLETED
+        assert restored.images[0].status == ImageBuildStatus.SUCCESS
 
     def test_restore_completed_task_unchanged(self, db_path):
         """Completed tasks should remain completed after restore."""

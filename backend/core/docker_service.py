@@ -3,6 +3,7 @@ import json
 import os
 import logging
 import signal
+import subprocess
 
 logger = logging.getLogger(__name__)
 
@@ -36,6 +37,18 @@ def _parse_registry_host(registry_with_prefix: str) -> str:
 
 
 class DockerService:
+
+    @staticmethod
+    def manifest_exists(image: str) -> bool:
+        """Check if an image exists in the remote registry (sync, for startup use)."""
+        try:
+            result = subprocess.run(
+                ["docker", "manifest", "inspect", image],
+                capture_output=True, timeout=30,
+            )
+            return result.returncode == 0
+        except Exception:
+            return False
 
     @staticmethod
     def check_registry_auth(registry_with_prefix: str) -> tuple[bool, str]:

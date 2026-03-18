@@ -16,6 +16,7 @@ from backend.core.task_models import (
     BuildTask,
     ImageBuildInfo,
     ImageBuildStatus,
+    StageStatus,
     TaskStatus,
 )
 
@@ -36,21 +37,58 @@ class TaskManager:
         self._restore_tasks()
 
     def _restore_tasks(self) -> None:
-        """Load tasks from DB and mark interrupted running tasks as failed."""
+        """Load tasks from DB and reconcile interrupted running tasks."""
         self.tasks = load_all_tasks(self.db_path)
         for task in self.tasks.values():
-            if task.status == TaskStatus.RUNNING:
-                logger.warning(
-                    f"Task [{task.task_name}] was running when server stopped, marking as failed"
-                )
-                task.status = TaskStatus.FAILED
-                task.finished_at = task.finished_at or datetime.now()
-                for img in task.images:
-                    if img.status in (ImageBuildStatus.PENDING, ImageBuildStatus.BUILDING):
+            if task.status != TaskStatus.RUNNING:
+                continue
+
+            logger.warning(
+                f"Task [{task.task_name}] was running when server stopped, reconciling..."
+            )
+            recovered = 0
+            for img in task.images:
+                if img.status == ImageBuildStatus.BUILDING:
+                    # Check if the image actually made it to the registry
+                    if DockerService.manifest_exists(img.target_image):
+                        img.status = ImageBuildStatus.SUCCESS
+                        img.error_message = None
+                        img.finished_at = img.finished_at or datetime.now()
+                        for stage in img.stages:
+                            if stage.status != StageStatus.SUCCESS:
+                                stage.status = StageStatus.SUCCESS
+                                stage.finished_at = stage.finished_at or datetime.now()
+                        recovered += 1
+                        logger.info(
+                            f"  Recovered {img.base_image} (exists in registry)"
+                        )
+                    else:
                         img.status = ImageBuildStatus.FAILED
                         img.error_message = "Server restarted while task was running"
                         img.finished_at = img.finished_at or datetime.now()
-                save_task(task, self.db_path)
+                elif img.status == ImageBuildStatus.PENDING:
+                    img.status = ImageBuildStatus.FAILED
+                    img.error_message = "Server restarted while task was running"
+                    img.finished_at = img.finished_at or datetime.now()
+
+            # Compute correct task status based on actual results
+            task.finished_at = task.finished_at or datetime.now()
+            if task.failed_images == 0:
+                task.status = TaskStatus.COMPLETED
+            elif task.completed_images == 0:
+                task.status = TaskStatus.FAILED
+            else:
+                task.status = TaskStatus.PARTIAL_FAILED
+
+            if recovered:
+                logger.info(
+                    f"  Task [{task.task_name}] recovered {recovered} images from registry"
+                )
+            logger.info(
+                f"  Task [{task.task_name}] final: {task.status.value} "
+                f"({task.completed_images}/{task.total_images} succeeded)"
+            )
+            save_task(task, self.db_path)
         logger.info(f"Restored {len(self.tasks)} tasks from database")
 
         # Back-fill missing dataset_images for completed successful images
