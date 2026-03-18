@@ -134,6 +134,46 @@ class TestDockerPruneImages:
             assert ok is False
 
 
+class TestDockerPruneBuildCache:
+    @pytest.mark.asyncio
+    async def test_prune_build_cache_success(self):
+        mock_proc = AsyncMock()
+        mock_proc.communicate = AsyncMock(return_value=(b"Total reclaimed space: 400GB\n", b""))
+        mock_proc.returncode = 0
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc) as mock_exec:
+            ok, msg = await DockerService.prune_build_cache()
+            assert ok is True
+            assert "400GB" in msg
+            mock_exec.assert_called_once_with(
+                "docker", "builder", "prune", "-af",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+
+    @pytest.mark.asyncio
+    async def test_prune_build_cache_failure(self):
+        mock_proc = AsyncMock()
+        mock_proc.communicate = AsyncMock(return_value=(b"", b"permission denied"))
+        mock_proc.returncode = 1
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+            ok, msg = await DockerService.prune_build_cache()
+            assert ok is False
+            assert "permission denied" in msg
+
+    @pytest.mark.asyncio
+    async def test_prune_build_cache_empty_output(self):
+        mock_proc = AsyncMock()
+        mock_proc.communicate = AsyncMock(return_value=(b"", b""))
+        mock_proc.returncode = 0
+
+        with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
+            ok, msg = await DockerService.prune_build_cache()
+            assert ok is True
+            assert msg == "Build cache pruned"
+
+
 class TestBuildCancellation:
     @pytest.mark.asyncio
     async def test_build_kills_subprocess_on_cancel(self):

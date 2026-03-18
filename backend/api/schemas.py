@@ -143,3 +143,17 @@ class DatasetImageListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+# ---- Export Failed Images ----
+
+class ExportFailedImagesResponse(BaseModel):
+    task_name: str
+    agent: str
+    agent_version: str
+    dataset: str
+    base_images: list[str]
+    push_dir: str
+    build_args: list[str]
+    retry_count: int
+    concurrency: int

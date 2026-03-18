@@ -189,6 +189,22 @@ class DockerService:
         return False, output or "Remove failed"
 
     @staticmethod
+    async def prune_build_cache() -> tuple[bool, str]:
+        """Prune Docker BuildKit build cache."""
+        proc = await asyncio.create_subprocess_exec(
+            "docker", "builder", "prune", "-af",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        stdout, stderr = await proc.communicate()
+        output = (stdout.decode() + stderr.decode()).strip()
+        if proc.returncode == 0:
+            logger.info(f"Pruned build cache: {output}")
+            return True, output or "Build cache pruned"
+        logger.warning(f"Failed to prune build cache: {output}")
+        return False, output or "Prune failed"
+
+    @staticmethod
     async def prune_images() -> tuple[bool, str]:
         """Prune dangling Docker images."""
         proc = await asyncio.create_subprocess_exec(

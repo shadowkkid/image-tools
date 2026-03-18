@@ -204,6 +204,9 @@ class ImageBuilder:
         if push_succeeded:
             await self.docker_service.remove_image(target_image)
 
+        # Prune BuildKit build cache to prevent disk bloat
+        await self.docker_service.prune_build_cache()
+
     def _get_stage(self, image_info: ImageBuildInfo, stage_name: StageName):
         for stage in image_info.stages:
             if stage.name == stage_name:

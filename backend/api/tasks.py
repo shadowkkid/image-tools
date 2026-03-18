@@ -2,6 +2,7 @@ from fastapi import APIRouter, HTTPException
 
 from backend.api.schemas import (
     CreateTaskRequest,
+    ExportFailedImagesResponse,
     ImageDetail,
     StageDetail,
     TaskDetail,
@@ -9,6 +10,7 @@ from backend.api.schemas import (
     TaskSummary,
 )
 from backend.core.task_manager import task_manager
+from backend.core.task_models import ImageBuildStatus
 
 router = APIRouter(prefix="/api/tasks", tags=["tasks"])
 
@@ -82,6 +84,32 @@ async def delete_task(task_id: str):
     if not success:
         raise HTTPException(status_code=400, detail=message)
     return {"success": True, "message": message}
+
+
+@router.get("/{task_id}/failed-images", response_model=ExportFailedImagesResponse)
+async def export_failed_images(task_id: str):
+    task = task_manager.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    failed_base_images = [
+        img.base_image for img in task.images
+        if img.status != ImageBuildStatus.SUCCESS
+    ]
+    if not failed_base_images:
+        raise HTTPException(status_code=400, detail="该任务没有失败的镜像")
+
+    return ExportFailedImagesResponse(
+        task_name=f"{task.task_name}-retry",
+        agent=task.agent,
+        agent_version=task.agent_version,
+        dataset=task.dataset,
+        base_images=failed_base_images,
+        push_dir=task.push_dir,
+        build_args=task.build_args,
+        retry_count=task.retry_count,
+        concurrency=task.concurrency,
+    )
 
 
 def _to_summary(task) -> TaskSummary:

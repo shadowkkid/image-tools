@@ -91,17 +91,20 @@ class TestImageBuilder:
 
         with patch.object(builder.docker_service, "build",
                           new_callable=AsyncMock,
-                          return_value=(True, "Build OK", ["Build OK"])):
-            with patch.object(builder.docker_service, "tag",
-                              new_callable=AsyncMock,
-                              return_value=(True, "Tag OK")):
-                with patch.object(builder.docker_service, "push",
-                                  new_callable=AsyncMock,
-                                  return_value=(True, "Push OK")):
-                    with patch.object(builder.docker_service, "remove_image",
-                                      new_callable=AsyncMock,
-                                      return_value=(True, "Removed")) as mock_remove:
-                        await builder.build_image(image_info, task, shared_dir)
+                          return_value=(True, "Build OK", ["Build OK"])), \
+             patch.object(builder.docker_service, "tag",
+                          new_callable=AsyncMock,
+                          return_value=(True, "Tag OK")), \
+             patch.object(builder.docker_service, "push",
+                          new_callable=AsyncMock,
+                          return_value=(True, "Push OK")), \
+             patch.object(builder.docker_service, "remove_image",
+                          new_callable=AsyncMock,
+                          return_value=(True, "Removed")) as mock_remove, \
+             patch.object(builder.docker_service, "prune_build_cache",
+                          new_callable=AsyncMock,
+                          return_value=(True, "Pruned")):
+            await builder.build_image(image_info, task, shared_dir)
 
         assert image_info.status == ImageBuildStatus.SUCCESS
         assert all(s.status == StageStatus.SUCCESS for s in image_info.stages)
@@ -122,17 +125,20 @@ class TestImageBuilder:
                 return (False, "ERROR: build failed", ["ERROR: build failed"])
             return (True, "Build OK", ["Build OK"])
 
-        with patch.object(builder.docker_service, "build", side_effect=mock_build):
-            with patch.object(builder.docker_service, "tag",
-                              new_callable=AsyncMock,
-                              return_value=(True, "Tag OK")):
-                with patch.object(builder.docker_service, "push",
-                                  new_callable=AsyncMock,
-                                  return_value=(True, "Push OK")):
-                    with patch.object(builder.docker_service, "remove_image",
-                                      new_callable=AsyncMock,
-                                      return_value=(True, "Removed")):
-                        await builder.build_image(image_info, task, shared_dir)
+        with patch.object(builder.docker_service, "build", side_effect=mock_build), \
+             patch.object(builder.docker_service, "tag",
+                          new_callable=AsyncMock,
+                          return_value=(True, "Tag OK")), \
+             patch.object(builder.docker_service, "push",
+                          new_callable=AsyncMock,
+                          return_value=(True, "Push OK")), \
+             patch.object(builder.docker_service, "remove_image",
+                          new_callable=AsyncMock,
+                          return_value=(True, "Removed")), \
+             patch.object(builder.docker_service, "prune_build_cache",
+                          new_callable=AsyncMock,
+                          return_value=(True, "Pruned")):
+            await builder.build_image(image_info, task, shared_dir)
 
         assert image_info.status == ImageBuildStatus.SUCCESS
         assert image_info.retry_attempts == 1
@@ -143,11 +149,14 @@ class TestImageBuilder:
 
         with patch.object(builder.docker_service, "build",
                           new_callable=AsyncMock,
-                          return_value=(False, "ERROR: always fails", ["ERROR: always fails"])):
-            with patch.object(builder.docker_service, "remove_image",
-                              new_callable=AsyncMock,
-                              return_value=(True, "Removed")):
-                await builder.build_image(image_info, task, shared_dir)
+                          return_value=(False, "ERROR: always fails", ["ERROR: always fails"])), \
+             patch.object(builder.docker_service, "remove_image",
+                          new_callable=AsyncMock,
+                          return_value=(True, "Removed")), \
+             patch.object(builder.docker_service, "prune_build_cache",
+                          new_callable=AsyncMock,
+                          return_value=(True, "Pruned")):
+            await builder.build_image(image_info, task, shared_dir)
 
         assert image_info.status == ImageBuildStatus.FAILED
         assert "docker_build" in (image_info.error_message or "")
@@ -159,17 +168,20 @@ class TestImageBuilder:
 
         with patch.object(builder.docker_service, "build",
                           new_callable=AsyncMock,
-                          return_value=(True, "Build OK", ["Build OK"])):
-            with patch.object(builder.docker_service, "tag",
-                              new_callable=AsyncMock,
-                              return_value=(True, "Tag OK")):
-                with patch.object(builder.docker_service, "push",
-                                  new_callable=AsyncMock,
-                                  return_value=(False, "push denied")):
-                    with patch.object(builder.docker_service, "remove_image",
-                                      new_callable=AsyncMock,
-                                      return_value=(True, "Removed")) as mock_remove:
-                        await builder.build_image(image_info, task, shared_dir)
+                          return_value=(True, "Build OK", ["Build OK"])), \
+             patch.object(builder.docker_service, "tag",
+                          new_callable=AsyncMock,
+                          return_value=(True, "Tag OK")), \
+             patch.object(builder.docker_service, "push",
+                          new_callable=AsyncMock,
+                          return_value=(False, "push denied")), \
+             patch.object(builder.docker_service, "remove_image",
+                          new_callable=AsyncMock,
+                          return_value=(True, "Removed")) as mock_remove, \
+             patch.object(builder.docker_service, "prune_build_cache",
+                          new_callable=AsyncMock,
+                          return_value=(True, "Pruned")):
+            await builder.build_image(image_info, task, shared_dir)
 
         assert image_info.status == ImageBuildStatus.FAILED
         assert "docker_push" in (image_info.error_message or "")
@@ -185,17 +197,20 @@ class TestImageCleanup:
 
         with patch.object(builder.docker_service, "build",
                           new_callable=AsyncMock,
-                          return_value=(True, "Build OK", ["Build OK"])):
-            with patch.object(builder.docker_service, "tag",
-                              new_callable=AsyncMock,
-                              return_value=(True, "Tag OK")):
-                with patch.object(builder.docker_service, "push",
-                                  new_callable=AsyncMock,
-                                  return_value=(True, "Push OK")):
-                    with patch.object(builder.docker_service, "remove_image",
-                                      new_callable=AsyncMock,
-                                      return_value=(True, "Removed")) as mock_remove:
-                        await builder.build_image(image_info, task, shared_dir)
+                          return_value=(True, "Build OK", ["Build OK"])), \
+             patch.object(builder.docker_service, "tag",
+                          new_callable=AsyncMock,
+                          return_value=(True, "Tag OK")), \
+             patch.object(builder.docker_service, "push",
+                          new_callable=AsyncMock,
+                          return_value=(True, "Push OK")), \
+             patch.object(builder.docker_service, "remove_image",
+                          new_callable=AsyncMock,
+                          return_value=(True, "Removed")) as mock_remove, \
+             patch.object(builder.docker_service, "prune_build_cache",
+                          new_callable=AsyncMock,
+                          return_value=(True, "Pruned")):
+            await builder.build_image(image_info, task, shared_dir)
 
         calls = mock_remove.call_args_list
         # First call: build tag
@@ -211,17 +226,20 @@ class TestImageCleanup:
 
         with patch.object(builder.docker_service, "build",
                           new_callable=AsyncMock,
-                          return_value=(True, "Build OK", ["Build OK"])):
-            with patch.object(builder.docker_service, "tag",
-                              new_callable=AsyncMock,
-                              return_value=(True, "Tag OK")):
-                with patch.object(builder.docker_service, "push",
-                                  new_callable=AsyncMock,
-                                  return_value=(False, "push denied")):
-                    with patch.object(builder.docker_service, "remove_image",
-                                      new_callable=AsyncMock,
-                                      return_value=(True, "Removed")) as mock_remove:
-                        await builder.build_image(image_info, task, shared_dir)
+                          return_value=(True, "Build OK", ["Build OK"])), \
+             patch.object(builder.docker_service, "tag",
+                          new_callable=AsyncMock,
+                          return_value=(True, "Tag OK")), \
+             patch.object(builder.docker_service, "push",
+                          new_callable=AsyncMock,
+                          return_value=(False, "push denied")), \
+             patch.object(builder.docker_service, "remove_image",
+                          new_callable=AsyncMock,
+                          return_value=(True, "Removed")) as mock_remove, \
+             patch.object(builder.docker_service, "prune_build_cache",
+                          new_callable=AsyncMock,
+                          return_value=(True, "Pruned")):
+            await builder.build_image(image_info, task, shared_dir)
 
         # Only the build tag should be removed
         assert mock_remove.call_count == 1
@@ -235,12 +253,40 @@ class TestImageCleanup:
 
         with patch.object(builder.docker_service, "build",
                           new_callable=AsyncMock,
-                          return_value=(False, "ERROR: fail", ["ERROR: fail"])):
-            with patch.object(builder.docker_service, "remove_image",
-                              new_callable=AsyncMock,
-                              return_value=(True, "Removed")) as mock_remove:
-                await builder.build_image(image_info, task, shared_dir)
+                          return_value=(False, "ERROR: fail", ["ERROR: fail"])), \
+             patch.object(builder.docker_service, "remove_image",
+                          new_callable=AsyncMock,
+                          return_value=(True, "Removed")) as mock_remove, \
+             patch.object(builder.docker_service, "prune_build_cache",
+                          new_callable=AsyncMock,
+                          return_value=(True, "Pruned")):
+            await builder.build_image(image_info, task, shared_dir)
 
         # Build tag removal attempted (best-effort)
         assert mock_remove.call_count == 1
         assert "image-tools-build/" in mock_remove.call_args.args[0]
+
+    @pytest.mark.asyncio
+    async def test_cleanup_calls_prune_build_cache(self, task, image_info, shared_dir):
+        """After cleanup, prune_build_cache should be called to prevent disk bloat."""
+        task.retry_count = 0
+        builder = ImageBuilder()
+
+        with patch.object(builder.docker_service, "build",
+                          new_callable=AsyncMock,
+                          return_value=(True, "Build OK", ["Build OK"])), \
+             patch.object(builder.docker_service, "tag",
+                          new_callable=AsyncMock,
+                          return_value=(True, "Tag OK")), \
+             patch.object(builder.docker_service, "push",
+                          new_callable=AsyncMock,
+                          return_value=(True, "Push OK")), \
+             patch.object(builder.docker_service, "remove_image",
+                          new_callable=AsyncMock,
+                          return_value=(True, "Removed")), \
+             patch.object(builder.docker_service, "prune_build_cache",
+                          new_callable=AsyncMock,
+                          return_value=(True, "Pruned")) as mock_prune_cache:
+            await builder.build_image(image_info, task, shared_dir)
+
+        mock_prune_cache.assert_called_once()
