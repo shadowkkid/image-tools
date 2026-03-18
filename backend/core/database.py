@@ -396,6 +396,47 @@ def list_dataset_images(
         conn.close()
 
 
+def delete_task(task_id: str, db_path: str | None = None) -> bool:
+    """Delete a task by task_id. Returns True if a row was deleted."""
+    db_path = db_path or _DEFAULT_DB_PATH
+    conn = _get_connection(db_path)
+    try:
+        cursor = conn.execute("DELETE FROM tasks WHERE task_id = ?", (task_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def delete_dataset(dataset_id: int, db_path: str | None = None) -> bool:
+    """Delete a dataset by id. Returns True if a row was deleted."""
+    db_path = db_path or _DEFAULT_DB_PATH
+    conn = _get_connection(db_path)
+    try:
+        cursor = conn.execute("DELETE FROM datasets WHERE id = ?", (dataset_id,))
+        conn.commit()
+        return cursor.rowcount > 0
+    finally:
+        conn.close()
+
+
+def delete_dataset_images(image_ids: list[int], db_path: str | None = None) -> int:
+    """Delete dataset_images by ids. Returns the number of rows deleted."""
+    if not image_ids:
+        return 0
+    db_path = db_path or _DEFAULT_DB_PATH
+    conn = _get_connection(db_path)
+    try:
+        placeholders = ",".join("?" for _ in image_ids)
+        cursor = conn.execute(
+            f"DELETE FROM dataset_images WHERE id IN ({placeholders})", image_ids
+        )
+        conn.commit()
+        return cursor.rowcount
+    finally:
+        conn.close()
+
+
 def get_dataset_by_id(dataset_id: int, db_path: str | None = None) -> dict | None:
     """Get a single dataset by id."""
     db_path = db_path or _DEFAULT_DB_PATH

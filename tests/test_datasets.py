@@ -2,6 +2,8 @@ import pytest
 
 from backend.core.database import (
     add_dataset_image,
+    delete_dataset,
+    delete_dataset_images,
     ensure_dataset,
     get_dataset_by_id,
     init_db,
@@ -254,3 +256,88 @@ class TestDatasetFieldInTask:
         assert t.dataset == ""
         assert t.agent == ""
         assert t.agent_version == ""
+
+
+class TestDeleteDataset:
+    def test_delete_existing_dataset(self, db_path):
+        ds_id = ensure_dataset("del-ds", "OpenHands", "0.54.0", db_path)
+        result = delete_dataset(ds_id, db_path)
+        assert result is True
+        assert get_dataset_by_id(ds_id, db_path) is None
+
+    def test_delete_nonexistent_dataset(self, db_path):
+        result = delete_dataset(99999, db_path)
+        assert result is False
+
+    def test_delete_cascades_dataset_images(self, db_path):
+        task = BuildTask(
+            task_name="cascade-ds",
+            deps_image="deps:v1",
+            push_dir="reg/repo",
+            base_images=["a:1"],
+            agent="OpenHands",
+            agent_version="0.54.0",
+            dataset="cascade-ds",
+        )
+        task.images.append(
+            ImageBuildInfo(base_image="a:1", target_image="reg/repo/a:1")
+        )
+        save_task(task, db_path)
+
+        ds_id = ensure_dataset("cascade-ds", "OpenHands", "0.54.0", db_path)
+        add_dataset_image("cascade-ds", "reg/repo/a:1", task.task_id, "OpenHands", "0.54.0", db_path)
+
+        # Verify image exists
+        rows, total = list_dataset_images(ds_id, db_path=db_path)
+        assert total == 1
+
+        # Delete dataset
+        delete_dataset(ds_id, db_path)
+
+        # Dataset gone
+        assert get_dataset_by_id(ds_id, db_path) is None
+
+
+class TestDeleteDatasetImages:
+    def _setup(self, db_path):
+        task = BuildTask(
+            task_name="batch-del",
+            deps_image="deps:v1",
+            push_dir="reg/repo",
+            base_images=["a:1", "b:2", "c:3"],
+            agent="OpenHands",
+            agent_version="0.54.0",
+            dataset="batch-ds",
+        )
+        task.images = [
+            ImageBuildInfo(base_image=f"{x}:1", target_image=f"reg/repo/{x}:1")
+            for x in ("a", "b", "c")
+        ]
+        save_task(task, db_path)
+
+        ds_id = ensure_dataset("batch-ds", "OpenHands", "0.54.0", db_path)
+        for x in ("a", "b", "c"):
+            add_dataset_image("batch-ds", f"reg/repo/{x}:1", task.task_id, "OpenHands", "0.54.0", db_path)
+        return ds_id
+
+    def test_batch_delete(self, db_path):
+        ds_id = self._setup(db_path)
+
+        rows, total = list_dataset_images(ds_id, db_path=db_path)
+        assert total == 3
+
+        # Delete first two
+        ids_to_delete = [rows[0]["id"], rows[1]["id"]]
+        count = delete_dataset_images(ids_to_delete, db_path)
+        assert count == 2
+
+        _, remaining = list_dataset_images(ds_id, db_path=db_path)
+        assert remaining == 1
+
+    def test_delete_empty_list(self, db_path):
+        count = delete_dataset_images([], db_path)
+        assert count == 0
+
+    def test_delete_nonexistent_ids(self, db_path):
+        count = delete_dataset_images([99998, 99999], db_path)
+        assert count == 0

@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { Card, Table, Input, Button, Space } from 'antd';
-import { ArrowLeftOutlined, ReloadOutlined } from '@ant-design/icons';
-import { getDatasetImages } from '../api/client';
+import { Card, Table, Input, Button, Space, Modal, message } from 'antd';
+import { ArrowLeftOutlined, ReloadOutlined, DeleteOutlined } from '@ant-design/icons';
+import { getDatasetImages, batchDeleteDatasetImages } from '../api/client';
 import type { DatasetImageItem } from '../types';
 
 const { Search } = Input;
@@ -15,6 +15,7 @@ export default function DatasetDetail() {
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
+  const [selectedRowKeys, setSelectedRowKeys] = useState<React.Key[]>([]);
   const pageSize = 50;
 
   const fetchImages = async (p: number = page, q: string = search) => {
@@ -46,6 +47,27 @@ export default function DatasetDetail() {
   const handlePageChange = (newPage: number) => {
     setPage(newPage);
     fetchImages(newPage);
+  };
+
+  const handleBatchDelete = () => {
+    if (selectedRowKeys.length === 0) return;
+    Modal.confirm({
+      title: '确认删除',
+      content: `确定要删除选中的 ${selectedRowKeys.length} 条镜像记录吗？此操作不可恢复。`,
+      okText: '删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await batchDeleteDatasetImages(Number(datasetId), selectedRowKeys.map(Number));
+          message.success('镜像记录已删除');
+          setSelectedRowKeys([]);
+          fetchImages();
+        } catch (err: any) {
+          message.error(err?.response?.data?.detail || '删除失败');
+        }
+      },
+    });
   };
 
   const columns = [
@@ -82,6 +104,15 @@ export default function DatasetDetail() {
       title="数据集镜像列表"
       extra={
         <Space>
+          {selectedRowKeys.length > 0 && (
+            <Button
+              danger
+              icon={<DeleteOutlined />}
+              onClick={handleBatchDelete}
+            >
+              删除选中 ({selectedRowKeys.length})
+            </Button>
+          )}
           <Search
             placeholder="搜索镜像名称"
             onSearch={handleSearch}
@@ -106,6 +137,10 @@ export default function DatasetDetail() {
         columns={columns}
         rowKey="id"
         loading={loading}
+        rowSelection={{
+          selectedRowKeys,
+          onChange: (keys) => setSelectedRowKeys(keys),
+        }}
         pagination={{
           current: page,
           pageSize,

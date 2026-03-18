@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Card, Table, Tag, Button, Space } from 'antd';
-import { PlusOutlined, ReloadOutlined, ArrowLeftOutlined } from '@ant-design/icons';
-import { listTasks } from '../api/client';
+import { Card, Table, Tag, Button, Space, Modal, message } from 'antd';
+import { PlusOutlined, ReloadOutlined, ArrowLeftOutlined, DeleteOutlined } from '@ant-design/icons';
+import { listTasks, deleteTask } from '../api/client';
 import type { TaskSummary } from '../types';
 
 const statusColorMap: Record<string, string> = {
@@ -43,6 +43,25 @@ export default function TaskList() {
     const timer = setInterval(fetchTasks, 3000);
     return () => clearInterval(timer);
   }, []);
+
+  const handleDeleteTask = (taskId: string, taskName: string) => {
+    Modal.confirm({
+      title: '确认删除',
+      content: `确定要删除任务「${taskName}」吗？此操作不可恢复。`,
+      okText: '删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await deleteTask(taskId);
+          message.success('任务已删除');
+          fetchTasks();
+        } catch (err: any) {
+          message.error(err?.response?.data?.detail || '删除失败');
+        }
+      },
+    });
+  };
 
   const columns = [
     {
@@ -110,6 +129,26 @@ export default function TaskList() {
       key: 'elapsed_seconds',
       width: 120,
       render: (v: number | null) => (v != null ? `${v.toFixed(1)}s` : '-'),
+    },
+    {
+      title: '操作',
+      key: 'action',
+      width: 80,
+      render: (_: unknown, record: TaskSummary) =>
+        record.status !== 'running' ? (
+          <Button
+            type="link"
+            danger
+            icon={<DeleteOutlined />}
+            size="small"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleDeleteTask(record.task_id, record.task_name);
+            }}
+          >
+            删除
+          </Button>
+        ) : null,
     },
   ];
 

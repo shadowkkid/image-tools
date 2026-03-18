@@ -113,6 +113,10 @@ class AgentListResponse(BaseModel):
 
 # ---- Datasets ----
 
+class BatchDeleteRequest(BaseModel):
+    ids: list[int]
+
+
 class DatasetSummary(BaseModel):
     id: int
     name: str

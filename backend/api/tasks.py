@@ -76,6 +76,14 @@ async def stop_task(task_id: str):
     return {"success": True, "message": message}
 
 
+@router.delete("/{task_id}")
+async def delete_task(task_id: str):
+    success, message = await task_manager.delete_task(task_id)
+    if not success:
+        raise HTTPException(status_code=400, detail=message)
+    return {"success": True, "message": message}
+
+
 def _to_summary(task) -> TaskSummary:
     return TaskSummary(
         task_id=task.task_id,

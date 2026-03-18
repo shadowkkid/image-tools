@@ -3,13 +3,20 @@ from fastapi import APIRouter, HTTPException, Query
 from backend.api.schemas import (
     AgentInfo,
     AgentListResponse,
+    BatchDeleteRequest,
     DatasetImageItem,
     DatasetImageListResponse,
     DatasetListResponse,
     DatasetSummary,
 )
 from backend.config import AGENTS
-from backend.core.database import get_dataset_by_id, list_dataset_images, list_datasets
+from backend.core.database import (
+    delete_dataset,
+    delete_dataset_images,
+    get_dataset_by_id,
+    list_dataset_images,
+    list_datasets,
+)
 from backend.core.task_manager import task_manager
 
 router = APIRouter(prefix="/api", tags=["datasets"])
@@ -81,3 +88,20 @@ async def get_dataset_images(
         page=page,
         page_size=page_size,
     )
+
+
+@router.delete("/datasets/{dataset_id}")
+async def remove_dataset(dataset_id: int):
+    deleted = delete_dataset(dataset_id, db_path=task_manager.db_path)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    return {"success": True, "message": "数据集已删除"}
+
+
+@router.post("/datasets/{dataset_id}/images/batch-delete")
+async def batch_delete_images(dataset_id: int, req: BatchDeleteRequest):
+    ds = get_dataset_by_id(dataset_id, db_path=task_manager.db_path)
+    if not ds:
+        raise HTTPException(status_code=404, detail="Dataset not found")
+    count = delete_dataset_images(req.ids, db_path=task_manager.db_path)
+    return {"success": True, "deleted": count}

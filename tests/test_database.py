@@ -3,7 +3,7 @@ from datetime import datetime
 
 import pytest
 
-from backend.core.database import init_db, load_all_tasks, save_task
+from backend.core.database import init_db, load_all_tasks, save_task, delete_task
 from backend.core.task_models import (
     BuildTask,
     ImageBuildInfo,
@@ -217,3 +217,53 @@ class TestSaveAndLoadTask:
         assert t.finished_at == now
         assert t.images[0].started_at == now
         assert t.images[0].finished_at == now
+
+
+class TestDeleteTask:
+    def test_delete_existing_task(self, db_path):
+        task = BuildTask(
+            task_name="to-delete",
+            deps_image="deps:v1",
+            push_dir="reg/repo",
+            base_images=["ubuntu:22.04"],
+            status=TaskStatus.COMPLETED,
+        )
+        task.images.append(
+            ImageBuildInfo(
+                base_image="ubuntu:22.04",
+                target_image="reg/repo/ubuntu:22.04",
+                status=ImageBuildStatus.SUCCESS,
+            )
+        )
+        save_task(task, db_path)
+
+        result = delete_task(task.task_id, db_path)
+        assert result is True
+
+        loaded = load_all_tasks(db_path)
+        assert task.task_id not in loaded
+
+    def test_delete_nonexistent_task(self, db_path):
+        result = delete_task("nonexistent-id", db_path)
+        assert result is False
+
+    def test_delete_cascades_images_and_stages(self, db_path):
+        task = BuildTask(
+            task_name="cascade-test",
+            deps_image="deps:v1",
+            push_dir="reg/repo",
+            base_images=["a:1", "b:2"],
+        )
+        task.images = [
+            ImageBuildInfo(base_image="a:1", target_image="reg/repo/a:1"),
+            ImageBuildInfo(base_image="b:2", target_image="reg/repo/b:2"),
+        ]
+        save_task(task, db_path)
+
+        # Verify task exists with images
+        loaded = load_all_tasks(db_path)
+        assert len(loaded[task.task_id].images) == 2
+
+        delete_task(task.task_id, db_path)
+        loaded = load_all_tasks(db_path)
+        assert task.task_id not in loaded

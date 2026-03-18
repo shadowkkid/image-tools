@@ -10,7 +10,7 @@ from backend.builder.image_builder import (
     prep_shared_build_context,
 )
 from backend.config import get_agent_config
-from backend.core.database import add_dataset_image, ensure_dataset, init_db, load_all_tasks, save_task
+from backend.core.database import add_dataset_image, delete_task as db_delete_task, ensure_dataset, init_db, load_all_tasks, save_task
 from backend.core.docker_service import DockerService
 from backend.core.task_models import (
     BuildTask,
@@ -312,6 +312,20 @@ class TaskManager:
             return True, "任务正在停止"
 
         return False, "未找到运行中的后台任务"
+
+    async def delete_task(self, task_id: str) -> tuple[bool, str]:
+        """Delete a finished task from memory and DB."""
+        task = self.tasks.get(task_id)
+        if not task:
+            return False, "任务不存在"
+        if task.status == TaskStatus.RUNNING:
+            return False, "运行中的任务无法删除，请先停止任务"
+
+        async with self._lock:
+            self.tasks.pop(task_id, None)
+        self._async_tasks.pop(task_id, None)
+        db_delete_task(task_id, self.db_path)
+        return True, "任务已删除"
 
 
 # Global instance

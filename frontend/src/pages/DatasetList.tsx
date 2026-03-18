@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Card, Table, Input, Button, Space } from 'antd';
-import { ArrowLeftOutlined, ReloadOutlined } from '@ant-design/icons';
-import { listDatasets } from '../api/client';
+import { Card, Table, Input, Button, Space, Modal, message } from 'antd';
+import { ArrowLeftOutlined, ReloadOutlined, DeleteOutlined } from '@ant-design/icons';
+import { listDatasets, deleteDataset } from '../api/client';
 import type { DatasetSummary } from '../types';
 
 const { Search } = Input;
@@ -30,6 +30,25 @@ export default function DatasetList() {
   const handleSearch = (value: string) => {
     setSearch(value);
     fetchDatasets(value);
+  };
+
+  const handleDeleteDataset = (id: number, name: string) => {
+    Modal.confirm({
+      title: '确认删除',
+      content: `确定要删除数据集「${name}」及其所有镜像记录吗？此操作不可恢复。`,
+      okText: '删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        try {
+          await deleteDataset(id);
+          message.success('数据集已删除');
+          fetchDatasets();
+        } catch (err: any) {
+          message.error(err?.response?.data?.detail || '删除失败');
+        }
+      },
+    });
   };
 
   const columns = [
@@ -64,6 +83,25 @@ export default function DatasetList() {
       key: 'created_at',
       width: 200,
       render: (t: string) => t ? new Date(t).toLocaleString() : '-',
+    },
+    {
+      title: '操作',
+      key: 'action',
+      width: 80,
+      render: (_: unknown, record: DatasetSummary) => (
+        <Button
+          type="link"
+          danger
+          icon={<DeleteOutlined />}
+          size="small"
+          onClick={(e) => {
+            e.stopPropagation();
+            handleDeleteDataset(record.id, record.name);
+          }}
+        >
+          删除
+        </Button>
+      ),
     },
   ];
 

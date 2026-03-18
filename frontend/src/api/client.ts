@@ -84,3 +84,22 @@ export async function getDatasetImages(
   const { data } = await api.get(`/datasets/${datasetId}/images`, { params });
   return data;
 }
+
+// Delete operations
+export async function deleteTask(taskId: string): Promise<{ success: boolean; message: string }> {
+  const { data } = await api.delete(`/tasks/${taskId}`);
+  return data;
+}
+
+export async function deleteDataset(datasetId: number): Promise<{ success: boolean; message: string }> {
+  const { data } = await api.delete(`/datasets/${datasetId}`);
+  return data;
+}
+
+export async function batchDeleteDatasetImages(
+  datasetId: number,
+  ids: number[]
+): Promise<{ success: boolean; deleted: number }> {
+  const { data } = await api.post(`/datasets/${datasetId}/images/batch-delete`, { ids });
+  return data;
+}
