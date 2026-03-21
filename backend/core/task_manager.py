@@ -16,6 +16,7 @@ from backend.core.task_models import (
     BuildTask,
     ImageBuildInfo,
     ImageBuildStatus,
+    RETAG_STAGES,
     StageStatus,
     TaskStatus,
 )
@@ -121,8 +122,9 @@ class TaskManager:
         """Create a new build task and start execution in background."""
         # Resolve agent config
         agent_cfg = get_agent_config(agent, agent_version)
-        deps_image = agent_cfg["deps_image"]
-        source_dir = agent_cfg["source_dir"]
+        deps_image = agent_cfg.get("deps_image", "")
+        source_dir = agent_cfg.get("source_dir", "")
+        build_mode = agent_cfg.get("build_mode", "build")
 
         # Ensure dataset exists
         ensure_dataset(dataset, agent, agent_version, self.db_path)
@@ -138,16 +140,19 @@ class TaskManager:
             build_args=build_args or [],
             retry_count=retry_count,
             source_dir=source_dir,
+            build_mode=build_mode,
             concurrency=max(1, concurrency),
         )
 
         # Create ImageBuildInfo for each base image
+        stage_names = RETAG_STAGES if build_mode == "retag" else []
         for base_image in base_images:
             target_image = _compute_target_image(push_dir, base_image)
             task.images.append(
                 ImageBuildInfo(
                     base_image=base_image,
                     target_image=target_image,
+                    stage_names=stage_names,
                 )
             )
 
@@ -231,44 +236,41 @@ class TaskManager:
         shared_build_dir = None
 
         try:
-            # Prepare shared build context once for all images
-            logger.info(f"Task [{task.task_name}] preparing shared build context...")
-            shared_build_dir = await asyncio.get_event_loop().run_in_executor(
-                None, prep_shared_build_context, task.source_dir
-            )
-            logger.info(f"Task [{task.task_name}] shared build context ready")
+            # Prepare shared build context only for full build mode
+            if task.build_mode == "build":
+                logger.info(f"Task [{task.task_name}] preparing shared build context...")
+                shared_build_dir = await asyncio.get_event_loop().run_in_executor(
+                    None, prep_shared_build_context, task.source_dir
+                )
+                logger.info(f"Task [{task.task_name}] shared build context ready")
+            else:
+                logger.info(f"Task [{task.task_name}] retag mode, skipping build context")
+
+            async def process_image(img: ImageBuildInfo):
+                try:
+                    if task.build_mode == "retag":
+                        await self.image_builder.retag_image(img, task)
+                    else:
+                        await self.image_builder.build_image(
+                            img, task, shared_build_dir
+                        )
+                except Exception as e:
+                    logger.error(
+                        f"Unexpected error processing {img.base_image}: {e}"
+                    )
+                finally:
+                    self._save(task)
+                    self._record_dataset_image(task, img)
 
             if task.concurrency <= 1:
-                # Sequential execution
                 for image_info in task.images:
-                    try:
-                        await self.image_builder.build_image(
-                            image_info, task, shared_build_dir
-                        )
-                    except Exception as e:
-                        logger.error(
-                            f"Unexpected error building {image_info.base_image}: {e}"
-                        )
-                    finally:
-                        self._save(task)
-                        self._record_dataset_image(task, image_info)
+                    await process_image(image_info)
             else:
-                # Parallel execution with semaphore
                 sem = asyncio.Semaphore(task.concurrency)
 
                 async def build_with_limit(img: ImageBuildInfo):
                     async with sem:
-                        try:
-                            await self.image_builder.build_image(
-                                img, task, shared_build_dir
-                            )
-                        except Exception as e:
-                            logger.error(
-                                f"Unexpected error building {img.base_image}: {e}"
-                            )
-                        finally:
-                            self._save(task)
-                            self._record_dataset_image(task, img)
+                        await process_image(img)
 
                 await asyncio.gather(
                     *(build_with_limit(img) for img in task.images)

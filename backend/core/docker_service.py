@@ -143,6 +143,33 @@ class DockerService:
         return False, output, output_lines
 
     @staticmethod
+    async def pull(image: str) -> tuple[bool, str]:
+        """Execute docker pull."""
+        proc = await asyncio.create_subprocess_exec(
+            "docker", "pull", image,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT,
+        )
+
+        output_lines = []
+        try:
+            assert proc.stdout is not None
+            async for line in proc.stdout:
+                decoded = line.decode().rstrip()
+                if decoded:
+                    output_lines.append(decoded)
+
+            await proc.wait()
+        except asyncio.CancelledError:
+            await _kill_proc(proc, "docker pull")
+            raise
+
+        output = "\n".join(output_lines)
+        if proc.returncode == 0:
+            return True, output or "Pull succeeded"
+        return False, output or "Pull failed"
+
+    @staticmethod
     async def tag(source_image: str, target_image: str) -> tuple[bool, str]:
         """Execute docker tag."""
         proc = await asyncio.create_subprocess_exec(

@@ -188,7 +188,10 @@ export default function TaskCreate() {
             label="Base 镜像列表"
             name="base_images"
             rules={[{ required: true, message: '请输入至少一个 base 镜像' }]}
-            extra="每行一个镜像地址"
+            extra={selectedAgent && !selectedAgent.has_versions
+              ? "每行一个镜像地址，将直接拉取并打上新 tag 推送"
+              : "每行一个镜像地址"
+            }
           >
             <TextArea
               rows={4}
@@ -204,13 +207,15 @@ export default function TaskCreate() {
             <Input placeholder="例如: registry.sensecore.tech/ccr-sandbox-swe" />
           </Form.Item>
 
-          <Form.Item
-            label="Docker Build 参数"
-            name="build_args"
-            extra="每行一个参数，例如: --build-arg=HTTP_PROXY=http://proxy:8080"
-          >
-            <TextArea rows={3} placeholder="--build-arg=HTTP_PROXY=http://proxy:8080&#10;--network=host" />
-          </Form.Item>
+          {selectedAgent?.has_versions !== false && (
+            <Form.Item
+              label="Docker Build 参数"
+              name="build_args"
+              extra="每行一个参数，例如: --build-arg=HTTP_PROXY=http://proxy:8080"
+            >
+              <TextArea rows={3} placeholder="--build-arg=HTTP_PROXY=http://proxy:8080&#10;--network=host" />
+            </Form.Item>
+          )}
 
           <Form.Item label="每条命令重试次数" name="retry_count">
             <InputNumber min={0} max={10} style={{ width: 120 }} />

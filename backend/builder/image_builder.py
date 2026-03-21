@@ -121,6 +121,22 @@ class ImageBuilder:
         finally:
             image_info.finished_at = datetime.now()
 
+    async def retag_image(
+        self, image_info: ImageBuildInfo, task: BuildTask
+    ) -> None:
+        """Execute the 3-stage retag pipeline: pull → tag → push."""
+        image_info.status = ImageBuildStatus.BUILDING
+        image_info.started_at = datetime.now()
+
+        try:
+            await self._run_retag_with_retry(image_info, task)
+        except Exception as e:
+            image_info.status = ImageBuildStatus.FAILED
+            image_info.error_message = str(e)
+            logger.error(f"Retag failed for {image_info.base_image}: {e}")
+        finally:
+            image_info.finished_at = datetime.now()
+
     async def _run_with_retry(
         self, image_info: ImageBuildInfo, task: BuildTask, shared_build_dir: str
     ) -> None:
@@ -141,6 +157,40 @@ class ImageBuilder:
 
             try:
                 await self._execute_pipeline(image_info, task, shared_build_dir)
+                image_info.status = ImageBuildStatus.SUCCESS
+                return
+            except _StageError as e:
+                image_info.error_message = f"Stage [{e.stage.value}] failed: {e.message}"
+                if attempt < max_attempts - 1:
+                    logger.warning(
+                        f"Attempt {attempt + 1} failed for {image_info.base_image}: {e.message}"
+                    )
+                    continue
+                else:
+                    image_info.status = ImageBuildStatus.FAILED
+                    logger.error(
+                        f"All {max_attempts} attempts failed for {image_info.base_image}"
+                    )
+
+    async def _run_retag_with_retry(
+        self, image_info: ImageBuildInfo, task: BuildTask
+    ) -> None:
+        max_attempts = task.retry_count + 1
+
+        for attempt in range(max_attempts):
+            if attempt > 0:
+                image_info.retry_attempts = attempt
+                for stage in image_info.stages:
+                    stage.status = StageStatus.PENDING
+                    stage.started_at = None
+                    stage.finished_at = None
+                    stage.error_message = None
+                logger.info(
+                    f"Retry {attempt}/{task.retry_count} for {image_info.base_image}"
+                )
+
+            try:
+                await self._execute_retag_pipeline(image_info)
                 image_info.status = ImageBuildStatus.SUCCESS
                 return
             except _StageError as e:
@@ -189,6 +239,27 @@ class ImageBuilder:
             # Clean up local Docker images
             await self._cleanup_images(build_tag, image_info.target_image, push_succeeded)
 
+    async def _execute_retag_pipeline(self, image_info: ImageBuildInfo) -> None:
+        """Execute pull → tag → push pipeline for retag mode."""
+        push_succeeded = False
+
+        try:
+            # Stage 1: Docker pull
+            await self._stage_docker_pull(image_info, image_info.base_image)
+
+            # Stage 2: Docker tag
+            await self._stage_docker_tag(
+                image_info, image_info.base_image, image_info.target_image
+            )
+
+            # Stage 3: Docker push
+            await self._stage_docker_push(image_info, image_info.target_image)
+            push_succeeded = True
+        finally:
+            # Clean up target tag if push succeeded (image is in remote registry)
+            if push_succeeded:
+                await self.docker_service.remove_image(image_info.target_image)
+
     async def _cleanup_images(
         self, build_tag: str, target_image: str, push_succeeded: bool
     ) -> None:
@@ -226,6 +297,24 @@ class ImageBuilder:
         else:
             stage.status = StageStatus.FAILED
             stage.error_message = error_message
+
+    async def _stage_docker_pull(
+        self, image_info: ImageBuildInfo, image: str
+    ) -> None:
+        stage = self._start_stage(image_info, StageName.DOCKER_PULL)
+
+        try:
+            success, output = await self.docker_service.pull(image)
+            if not success:
+                self._finish_stage(stage, False, output)
+                raise _StageError(StageName.DOCKER_PULL, output)
+            self._finish_stage(stage, True)
+
+        except _StageError:
+            raise
+        except Exception as e:
+            self._finish_stage(stage, False, str(e))
+            raise _StageError(StageName.DOCKER_PULL, str(e))
 
     async def _stage_generate_dockerfile(
         self, image_info: ImageBuildInfo, task: BuildTask, shared_build_dir: str

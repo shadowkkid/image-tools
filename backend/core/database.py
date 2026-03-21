@@ -63,7 +63,8 @@ def init_db(db_path: str | None = None) -> str:
                 finished_at TEXT,
                 dataset TEXT NOT NULL DEFAULT '',
                 agent TEXT NOT NULL DEFAULT '',
-                agent_version TEXT NOT NULL DEFAULT ''
+                agent_version TEXT NOT NULL DEFAULT '',
+                build_mode TEXT NOT NULL DEFAULT 'build'
             );
 
             CREATE TABLE IF NOT EXISTS images (
@@ -118,6 +119,8 @@ def init_db(db_path: str | None = None) -> str:
             conn.execute("ALTER TABLE tasks ADD COLUMN agent TEXT NOT NULL DEFAULT ''")
         if "agent_version" not in task_cols:
             conn.execute("ALTER TABLE tasks ADD COLUMN agent_version TEXT NOT NULL DEFAULT ''")
+        if "build_mode" not in task_cols:
+            conn.execute("ALTER TABLE tasks ADD COLUMN build_mode TEXT NOT NULL DEFAULT 'build'")
 
         ds_cols = {row["name"] for row in conn.execute("PRAGMA table_info(datasets)").fetchall()}
         if "agent" not in ds_cols:
@@ -172,13 +175,14 @@ def save_task(task: BuildTask, db_path: str | None = None) -> None:
             task.dataset,
             task.agent,
             task.agent_version,
+            task.build_mode,
         )
         if existing:
             conn.execute(
                 """UPDATE tasks SET
                        task_name=?, deps_image=?, push_dir=?, base_images=?, build_args=?,
                        retry_count=?, concurrency=?, source_dir=?, status=?, created_at=?,
-                       finished_at=?, dataset=?, agent=?, agent_version=?
+                       finished_at=?, dataset=?, agent=?, agent_version=?, build_mode=?
                    WHERE task_id = ?""",
                 task_params + (task.task_id,),
             )
@@ -187,8 +191,8 @@ def save_task(task: BuildTask, db_path: str | None = None) -> None:
                 """INSERT INTO tasks
                    (task_name, deps_image, push_dir, base_images, build_args,
                     retry_count, concurrency, source_dir, status, created_at,
-                    finished_at, dataset, agent, agent_version, task_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    finished_at, dataset, agent, agent_version, build_mode, task_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 task_params + (task.task_id,),
             )
 
@@ -256,6 +260,7 @@ def load_all_tasks(db_path: str | None = None) -> dict[str, BuildTask]:
                 retry_count=row["retry_count"],
                 concurrency=row["concurrency"],
                 source_dir=row["source_dir"],
+                build_mode=row["build_mode"] if "build_mode" in row.keys() else "build",
                 task_id=row["task_id"],
                 status=TaskStatus(row["status"]),
                 images=[],

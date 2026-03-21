@@ -31,6 +31,7 @@ class StageStatus(str, Enum):
 class StageName(str, Enum):
     GENERATE_DOCKERFILE = "generate_dockerfile"
     DOCKER_BUILD = "docker_build"
+    DOCKER_PULL = "docker_pull"
     DOCKER_TAG = "docker_tag"
     DOCKER_PUSH = "docker_push"
 
@@ -38,6 +39,12 @@ class StageName(str, Enum):
 ALL_STAGES = [
     StageName.GENERATE_DOCKERFILE,
     StageName.DOCKER_BUILD,
+    StageName.DOCKER_TAG,
+    StageName.DOCKER_PUSH,
+]
+
+RETAG_STAGES = [
+    StageName.DOCKER_PULL,
     StageName.DOCKER_TAG,
     StageName.DOCKER_PUSH,
 ]
@@ -69,10 +76,12 @@ class ImageBuildInfo:
     error_message: str | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
+    stage_names: list[StageName] = field(default_factory=list)
 
     def __post_init__(self):
         if not self.stages:
-            self.stages = [StageInfo(name=s) for s in ALL_STAGES]
+            names = self.stage_names if self.stage_names else ALL_STAGES
+            self.stages = [StageInfo(name=s) for s in names]
 
     @property
     def elapsed_seconds(self) -> float | None:
@@ -102,6 +111,7 @@ class BuildTask:
     retry_count: int = 0
     concurrency: int = 2
     source_dir: str = ""
+    build_mode: str = "build"
     task_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     status: TaskStatus = TaskStatus.PENDING
     images: list[ImageBuildInfo] = field(default_factory=list)
