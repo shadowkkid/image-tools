@@ -34,6 +34,8 @@ class StageName(str, Enum):
     DOCKER_PULL = "docker_pull"
     DOCKER_TAG = "docker_tag"
     DOCKER_PUSH = "docker_push"
+    DOCKER_BUILD_ORIGINAL = "docker_build_original"
+    DOCKER_BUILD_ENVD = "docker_build_envd"
 
 
 ALL_STAGES = [
@@ -45,6 +47,13 @@ ALL_STAGES = [
 
 RETAG_STAGES = [
     StageName.DOCKER_PULL,
+    StageName.DOCKER_TAG,
+    StageName.DOCKER_PUSH,
+]
+
+HARBOR_STAGES = [
+    StageName.DOCKER_BUILD_ORIGINAL,
+    StageName.DOCKER_BUILD_ENVD,
     StageName.DOCKER_TAG,
     StageName.DOCKER_PUSH,
 ]
@@ -77,6 +86,10 @@ class ImageBuildInfo:
     started_at: datetime | None = None
     finished_at: datetime | None = None
     stage_names: list[StageName] = field(default_factory=list)
+    template_name: str = ""
+    harbor_task_name: str = ""
+    harbor_dockerfile_path: str = ""
+    harbor_docker_image: str = ""
 
     def __post_init__(self):
         if not self.stages:
@@ -112,6 +125,8 @@ class BuildTask:
     concurrency: int = 2
     source_dir: str = ""
     build_mode: str = "build"
+    dataset_path: str = ""
+    envd_binary_path: str = ""
     task_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     status: TaskStatus = TaskStatus.PENDING
     images: list[ImageBuildInfo] = field(default_factory=list)

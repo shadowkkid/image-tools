@@ -8,6 +8,7 @@ import type {
   DatasetSummary,
   DatasetImageItem,
   ExportFailedImagesResponse,
+  HarborTaskPreview,
 } from '../types';
 
 const api = axios.create({ baseURL: '/api' });
@@ -48,6 +49,7 @@ export interface CreateTaskParams {
   build_args?: string[];
   retry_count?: number;
   concurrency?: number;
+  dataset_path?: string;
 }
 
 export async function createTask(params: CreateTaskParams): Promise<TaskSummary> {
@@ -99,6 +101,13 @@ export async function exportFailedImages(taskId: string): Promise<ExportFailedIm
 
 export async function deleteDataset(datasetId: number): Promise<{ success: boolean; message: string }> {
   const { data } = await api.delete(`/datasets/${datasetId}`);
+  return data;
+}
+
+export async function parseHarborDataset(
+  datasetPath: string
+): Promise<{ tasks: HarborTaskPreview[]; total: number }> {
+  const { data } = await api.post('/harbor/parse-dataset', { dataset_path: datasetPath });
   return data;
 }
 

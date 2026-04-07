@@ -137,6 +137,22 @@ class ImageBuilder:
         finally:
             image_info.finished_at = datetime.now()
 
+    async def harbor_build_image(
+        self, image_info: ImageBuildInfo, task: BuildTask
+    ) -> None:
+        """Execute the harbor two-stage pipeline: build original → inject envd → tag → push."""
+        image_info.status = ImageBuildStatus.BUILDING
+        image_info.started_at = datetime.now()
+
+        try:
+            await self._run_harbor_with_retry(image_info, task)
+        except Exception as e:
+            image_info.status = ImageBuildStatus.FAILED
+            image_info.error_message = str(e)
+            logger.error(f"Harbor build failed for {image_info.base_image}: {e}")
+        finally:
+            image_info.finished_at = datetime.now()
+
     async def _run_with_retry(
         self, image_info: ImageBuildInfo, task: BuildTask, shared_build_dir: str
     ) -> None:
@@ -206,6 +222,40 @@ class ImageBuilder:
                         f"All {max_attempts} attempts failed for {image_info.base_image}"
                     )
 
+    async def _run_harbor_with_retry(
+        self, image_info: ImageBuildInfo, task: BuildTask
+    ) -> None:
+        max_attempts = task.retry_count + 1
+
+        for attempt in range(max_attempts):
+            if attempt > 0:
+                image_info.retry_attempts = attempt
+                for stage in image_info.stages:
+                    stage.status = StageStatus.PENDING
+                    stage.started_at = None
+                    stage.finished_at = None
+                    stage.error_message = None
+                logger.info(
+                    f"Retry {attempt}/{task.retry_count} for {image_info.base_image}"
+                )
+
+            try:
+                await self._execute_harbor_pipeline(image_info, task)
+                image_info.status = ImageBuildStatus.SUCCESS
+                return
+            except _StageError as e:
+                image_info.error_message = f"Stage [{e.stage.value}] failed: {e.message}"
+                if attempt < max_attempts - 1:
+                    logger.warning(
+                        f"Attempt {attempt + 1} failed for {image_info.base_image}: {e.message}"
+                    )
+                    continue
+                else:
+                    image_info.status = ImageBuildStatus.FAILED
+                    logger.error(
+                        f"All {max_attempts} attempts failed for {image_info.base_image}"
+                    )
+
     async def _execute_pipeline(
         self, image_info: ImageBuildInfo, task: BuildTask, shared_build_dir: str
     ) -> None:
@@ -259,6 +309,125 @@ class ImageBuilder:
             # Clean up target tag if push succeeded (image is in remote registry)
             if push_succeeded:
                 await self.docker_service.remove_image(image_info.target_image)
+
+    async def _execute_harbor_pipeline(
+        self, image_info: ImageBuildInfo, task: BuildTask
+    ) -> None:
+        """Execute harbor two-stage pipeline: build/pull original → inject envd → tag → push."""
+        safe_name = image_info.harbor_task_name or image_info.base_image.replace("/", "_").replace(":", "_")
+        original_tag = f"image-tools-harbor/{safe_name}:original"
+        envd_tag = f"image-tools-harbor/{safe_name}:envd"
+        push_succeeded = False
+        envd_build_dir = None
+
+        try:
+            # Stage 1: Build or pull original image
+            stage = self._start_stage(image_info, StageName.DOCKER_BUILD_ORIGINAL)
+            try:
+                if image_info.harbor_docker_image:
+                    # Prebuilt image: pull and tag
+                    success, output = await self.docker_service.pull(image_info.harbor_docker_image)
+                    if not success:
+                        self._finish_stage(stage, False, output)
+                        raise _StageError(StageName.DOCKER_BUILD_ORIGINAL, output)
+                    success, output = await self.docker_service.tag(image_info.harbor_docker_image, original_tag)
+                    if not success:
+                        self._finish_stage(stage, False, output)
+                        raise _StageError(StageName.DOCKER_BUILD_ORIGINAL, output)
+                elif image_info.harbor_dockerfile_path:
+                    # Build from task's Dockerfile
+                    build_context = os.path.dirname(image_info.harbor_dockerfile_path)
+                    success, output, _ = await self.docker_service.build(
+                        build_context_path=build_context,
+                        tags=[original_tag],
+                    )
+                    if not success:
+                        error_lines = [l for l in output.split("\n") if l.strip() and "ERROR" in l.upper()]
+                        error_msg = "\n".join(error_lines[-5:]) if error_lines else output[-2000:]
+                        self._finish_stage(stage, False, error_msg)
+                        raise _StageError(StageName.DOCKER_BUILD_ORIGINAL, error_msg)
+                else:
+                    # Fallback: pull base_image directly
+                    success, output = await self.docker_service.pull(image_info.base_image)
+                    if not success:
+                        self._finish_stage(stage, False, output)
+                        raise _StageError(StageName.DOCKER_BUILD_ORIGINAL, output)
+                    success, output = await self.docker_service.tag(image_info.base_image, original_tag)
+                    if not success:
+                        self._finish_stage(stage, False, output)
+                        raise _StageError(StageName.DOCKER_BUILD_ORIGINAL, output)
+
+                self._finish_stage(stage, True)
+            except _StageError:
+                raise
+            except Exception as e:
+                self._finish_stage(stage, False, str(e))
+                raise _StageError(StageName.DOCKER_BUILD_ORIGINAL, str(e))
+
+            # Stage 2: Build envd injection layer on top of original
+            stage = self._start_stage(image_info, StageName.DOCKER_BUILD_ENVD)
+            try:
+                envd_build_dir = tempfile.mkdtemp(prefix="image-tools-envd-")
+
+                # Copy envd binary
+                envd_src = task.envd_binary_path
+                if not envd_src or not os.path.isfile(envd_src):
+                    raise FileNotFoundError(f"envd binary not found: {envd_src}")
+                shutil.copy2(envd_src, os.path.join(envd_build_dir, "envd"))
+
+                # Write entrypoint.sh
+                entrypoint_content = (
+                    "#!/bin/bash\n"
+                    "set -e\n"
+                    "\n"
+                    "# Start envd (e2b infra daemon) in background\n"
+                    "envd -port 49983 -isnotfc &\n"
+                    "\n"
+                    '# Execute the passed command, or default to bash\n'
+                    'exec "${@:-bash}"\n'
+                )
+                with open(os.path.join(envd_build_dir, "entrypoint.sh"), "w") as f:
+                    f.write(entrypoint_content)
+
+                # Generate Dockerfile from template
+                dockerfile_content = self.dockerfile_generator.generate_envd(original_tag)
+                with open(os.path.join(envd_build_dir, "Dockerfile"), "w") as f:
+                    f.write(dockerfile_content)
+
+                # Build
+                success, output, _ = await self.docker_service.build(
+                    build_context_path=envd_build_dir,
+                    tags=[envd_tag],
+                )
+                if not success:
+                    error_lines = [l for l in output.split("\n") if l.strip() and "ERROR" in l.upper()]
+                    error_msg = "\n".join(error_lines[-5:]) if error_lines else output[-2000:]
+                    self._finish_stage(stage, False, error_msg)
+                    raise _StageError(StageName.DOCKER_BUILD_ENVD, error_msg)
+
+                self._finish_stage(stage, True)
+            except _StageError:
+                raise
+            except Exception as e:
+                self._finish_stage(stage, False, str(e))
+                raise _StageError(StageName.DOCKER_BUILD_ENVD, str(e))
+
+            # Stage 3: Docker tag
+            await self._stage_docker_tag(image_info, envd_tag, image_info.target_image)
+
+            # Stage 4: Docker push
+            await self._stage_docker_push(image_info, image_info.target_image)
+            push_succeeded = True
+        finally:
+            # Clean up temp dir
+            if envd_build_dir:
+                shutil.rmtree(envd_build_dir, ignore_errors=True)
+            # Clean up local Docker images
+            await self.docker_service.remove_image(original_tag)
+            await self.docker_service.remove_image(envd_tag)
+            if push_succeeded:
+                await self.docker_service.remove_image(image_info.target_image)
+            await self.docker_service.prune_build_cache()
 
     async def _cleanup_images(
         self, build_tag: str, target_image: str, push_succeeded: bool

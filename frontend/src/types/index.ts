@@ -14,6 +14,8 @@ export interface ImageDetail {
   retry_attempts: number;
   error_message: string | null;
   stages: StageDetail[];
+  template_name: string;
+  harbor_task_name: string;
 }
 
 export interface TaskSummary {
@@ -42,6 +44,7 @@ export interface TaskDetailData {
   build_args: string[];
   retry_count: number;
   concurrency: number;
+  dataset_path: string;
   created_at: string;
   finished_at: string | null;
   elapsed_seconds: number | null;
@@ -95,4 +98,12 @@ export interface ExportFailedImagesResponse {
   build_args: string[];
   retry_count: number;
   concurrency: number;
+  dataset_path: string;
+}
+
+export interface HarborTaskPreview {
+  task_name: string;
+  base_image: string;
+  has_dockerfile: boolean;
+  has_docker_image: boolean;
 }

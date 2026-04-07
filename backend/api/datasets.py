@@ -8,6 +8,9 @@ from backend.api.schemas import (
     DatasetImageListResponse,
     DatasetListResponse,
     DatasetSummary,
+    HarborTaskPreview,
+    ParseDatasetRequest,
+    ParseDatasetResponse,
 )
 from backend.config import AGENTS
 from backend.core.database import (
@@ -105,3 +108,27 @@ async def batch_delete_images(dataset_id: int, req: BatchDeleteRequest):
         raise HTTPException(status_code=404, detail="Dataset not found")
     count = delete_dataset_images(req.ids, db_path=task_manager.db_path)
     return {"success": True, "deleted": count}
+
+
+@router.post("/harbor/parse-dataset", response_model=ParseDatasetResponse)
+async def parse_harbor_dataset_endpoint(req: ParseDatasetRequest):
+    """Parse a harbor dataset directory and return task previews."""
+    from backend.builder.harbor_dataset_parser import parse_harbor_dataset
+
+    try:
+        tasks = parse_harbor_dataset(req.dataset_path)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    return ParseDatasetResponse(
+        tasks=[
+            HarborTaskPreview(
+                task_name=t.task_name,
+                base_image=t.base_image,
+                has_dockerfile=bool(t.dockerfile_path),
+                has_docker_image=bool(t.docker_image),
+            )
+            for t in tasks
+        ],
+        total=len(tasks),
+    )

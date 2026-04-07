@@ -31,11 +31,12 @@ class CreateTaskRequest(BaseModel):
     agent: str
     agent_version: str = ""
     dataset: str
-    base_images: list[str]
+    base_images: list[str] = []
     push_dir: str
     build_args: list[str] = []
     retry_count: int = 0
     concurrency: int = 2
+    dataset_path: str = ""
 
 
 class StageDetail(BaseModel):
@@ -54,6 +55,8 @@ class ImageDetail(BaseModel):
     retry_attempts: int = 0
     error_message: str | None = None
     stages: list[StageDetail] = []
+    template_name: str = ""
+    harbor_task_name: str = ""
 
 
 class TaskSummary(BaseModel):
@@ -82,6 +85,7 @@ class TaskDetail(BaseModel):
     build_args: list[str]
     retry_count: int
     concurrency: int
+    dataset_path: str = ""
     created_at: str
     finished_at: str | None = None
     elapsed_seconds: float | None = None
@@ -157,3 +161,22 @@ class ExportFailedImagesResponse(BaseModel):
     build_args: list[str]
     retry_count: int
     concurrency: int
+    dataset_path: str = ""
+
+
+# ---- Harbor Dataset ----
+
+class ParseDatasetRequest(BaseModel):
+    dataset_path: str
+
+
+class HarborTaskPreview(BaseModel):
+    task_name: str
+    base_image: str
+    has_dockerfile: bool
+    has_docker_image: bool
+
+
+class ParseDatasetResponse(BaseModel):
+    tasks: list[HarborTaskPreview]
+    total: int

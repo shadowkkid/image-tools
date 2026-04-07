@@ -42,6 +42,9 @@ const statusLabelMap: Record<string, string> = {
 const stageLabelMap: Record<string, string> = {
   generate_dockerfile: '生成 Dockerfile',
   docker_build: 'Docker 构建',
+  docker_build_original: '构建原始镜像',
+  docker_build_envd: '注入 envd 层',
+  docker_pull: '拉取镜像',
   docker_tag: '镜像标签',
   docker_push: '镜像推送',
 };
@@ -93,6 +96,7 @@ export default function TaskDetail() {
   }
 
   const isRunning = task.status === 'running';
+  const isHarbor = task.agent === 'harbor';
 
   const handleStop = () => {
     Modal.confirm({
@@ -114,7 +118,7 @@ export default function TaskDetail() {
   };
 
   const handleClone = () => {
-    const cloneData = {
+    const cloneData: Record<string, unknown> = {
       task_name: `${task.task_name}-copy`,
       agent: task.agent,
       agent_version: task.agent_version,
@@ -125,6 +129,9 @@ export default function TaskDetail() {
       retry_count: task.retry_count,
       concurrency: task.concurrency,
     };
+    if (isHarbor && task.dataset_path) {
+      cloneData.dataset_path = task.dataset_path;
+    }
     navigate('/create', { state: cloneData });
   };
 
@@ -142,6 +149,7 @@ export default function TaskDetail() {
           build_args: res.build_args.join('\n'),
           retry_count: res.retry_count,
           concurrency: res.concurrency,
+          dataset_path: res.dataset_path || undefined,
         },
       });
     } catch {
@@ -181,18 +189,55 @@ export default function TaskDetail() {
     </div>
   );
 
+  const handleCopySuccessImages = () => {
+    const successImages = task.images
+      .filter((img) => img.status === 'success')
+      .map((img) => `${img.target_image}\t${img.template_name}`)
+      .join('\n');
+    if (!successImages) {
+      message.warning('没有构建成功的镜像');
+      return;
+    }
+    navigator.clipboard.writeText(successImages).then(
+      () => message.success(`已复制 ${task.images.filter((img) => img.status === 'success').length} 条记录`),
+      () => message.error('复制失败'),
+    );
+  };
+
   const imageColumns = [
     {
       title: 'Base 镜像',
       dataIndex: 'base_image',
       key: 'base_image',
     },
+    ...(isHarbor
+      ? [
+          {
+            title: 'Harbor Task',
+            dataIndex: 'harbor_task_name',
+            key: 'harbor_task_name',
+            width: 160,
+            ellipsis: true,
+          },
+        ]
+      : []),
     {
       title: '目标镜像',
       dataIndex: 'target_image',
       key: 'target_image',
       ellipsis: true,
     },
+    ...(isHarbor
+      ? [
+          {
+            title: 'Template Name',
+            dataIndex: 'template_name',
+            key: 'template_name',
+            width: 200,
+            ellipsis: true,
+          },
+        ]
+      : []),
     {
       title: '状态',
       dataIndex: 'status',
@@ -246,6 +291,11 @@ export default function TaskDetail() {
         {!isRunning && task.failed_images > 0 && (
           <Button icon={<RedoOutlined />} onClick={handleRetryFailed}>
             重试失败镜像
+          </Button>
+        )}
+        {isHarbor && task.completed_images > 0 && (
+          <Button icon={<CopyOutlined />} onClick={handleCopySuccessImages}>
+            批量复制成功镜像
           </Button>
         )}
         {isRunning && <Tag color="processing">任务运行中，自动刷新</Tag>}

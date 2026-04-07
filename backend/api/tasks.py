@@ -28,6 +28,7 @@ async def create_task(req: CreateTaskRequest):
             build_args=req.build_args,
             retry_count=req.retry_count,
             concurrency=req.concurrency,
+            dataset_path=req.dataset_path,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -60,6 +61,7 @@ async def get_task(task_id: str):
         build_args=task.build_args,
         retry_count=task.retry_count,
         concurrency=task.concurrency,
+        dataset_path=task.dataset_path,
         created_at=task.created_at.isoformat(),
         finished_at=task.finished_at.isoformat() if task.finished_at else None,
         elapsed_seconds=task.elapsed_seconds,
@@ -109,6 +111,7 @@ async def export_failed_images(task_id: str):
         build_args=task.build_args,
         retry_count=task.retry_count,
         concurrency=task.concurrency,
+        dataset_path=task.dataset_path,
     )
 
 
@@ -137,6 +140,8 @@ def _to_image_detail(img) -> ImageDetail:
         elapsed_seconds=img.elapsed_seconds,
         retry_attempts=img.retry_attempts,
         error_message=img.error_message,
+        template_name=img.template_name,
+        harbor_task_name=img.harbor_task_name,
         stages=[
             StageDetail(
                 name=s.name.value,

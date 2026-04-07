@@ -9,11 +9,12 @@ import {
   Button,
   message,
   Space,
+  Table,
 } from 'antd';
-import { ArrowLeftOutlined } from '@ant-design/icons';
-import { checkAuth, createTask, listAgents } from '../api/client';
+import { ArrowLeftOutlined, SearchOutlined } from '@ant-design/icons';
+import { checkAuth, createTask, listAgents, parseHarborDataset } from '../api/client';
 import LoginModal from '../components/LoginModal';
-import type { AgentInfo } from '../types';
+import type { AgentInfo, HarborTaskPreview } from '../types';
 
 const { TextArea } = Input;
 
@@ -26,6 +27,10 @@ export default function TaskCreate() {
   const [loginRegistry, setLoginRegistry] = useState('');
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [selectedAgent, setSelectedAgent] = useState<AgentInfo | null>(null);
+  const [harborPreview, setHarborPreview] = useState<HarborTaskPreview[]>([]);
+  const [parsing, setParsing] = useState(false);
+
+  const isHarbor = selectedAgent?.name === 'harbor';
 
   useEffect(() => {
     listAgents().then((res) => {
@@ -58,10 +63,29 @@ export default function TaskCreate() {
   const handleAgentChange = (agentName: string) => {
     const agent = agents.find((a) => a.name === agentName) || null;
     setSelectedAgent(agent);
+    setHarborPreview([]);
     form.setFieldsValue({ agent_version: undefined });
     // Auto-select if only one version
     if (agent?.has_versions && agent.versions.length === 1) {
       form.setFieldsValue({ agent_version: agent.versions[0] });
+    }
+  };
+
+  const handleParseDataset = async () => {
+    const datasetPath = form.getFieldValue('dataset_path');
+    if (!datasetPath) {
+      message.warning('请先输入数据集路径');
+      return;
+    }
+    setParsing(true);
+    try {
+      const res = await parseHarborDataset(datasetPath);
+      setHarborPreview(res.tasks);
+      message.success(`解析到 ${res.total} 个任务`);
+    } catch {
+      message.error('解析数据集失败');
+    } finally {
+      setParsing(false);
     }
   };
 
@@ -90,10 +114,13 @@ export default function TaskCreate() {
   };
 
   const doCreateTask = async (values: Record<string, unknown>) => {
-    const baseImages = (values.base_images as string)
-      .split('\n')
-      .map((s: string) => s.trim())
-      .filter(Boolean);
+    const isHarborAgent = values.agent === 'harbor';
+    const baseImages = isHarborAgent
+      ? []
+      : (values.base_images as string)
+          .split('\n')
+          .map((s: string) => s.trim())
+          .filter(Boolean);
     const buildArgs = values.build_args
       ? (values.build_args as string)
           .split('\n')
@@ -111,6 +138,7 @@ export default function TaskCreate() {
       build_args: buildArgs,
       retry_count: (values.retry_count as number) ?? 0,
       concurrency: (values.concurrency as number) ?? 1,
+      dataset_path: isHarborAgent ? (values.dataset_path as string) || '' : undefined,
     });
 
     message.success(`任务 "${res.task_name}" 已创建`);
@@ -184,20 +212,60 @@ export default function TaskCreate() {
             <Input placeholder="例如: swe-bench-verified" />
           </Form.Item>
 
-          <Form.Item
-            label="Base 镜像列表"
-            name="base_images"
-            rules={[{ required: true, message: '请输入至少一个 base 镜像' }]}
-            extra={selectedAgent && !selectedAgent.has_versions
-              ? "每行一个镜像地址，将直接拉取并打上新 tag 推送"
-              : "每行一个镜像地址"
-            }
-          >
-            <TextArea
-              rows={4}
-              placeholder={"ubuntu:22.04\ndebian:bookworm\nnikolaik/python-nodejs:python3.12-nodejs22"}
-            />
-          </Form.Item>
+          {isHarbor ? (
+            <>
+              <Form.Item
+                label="数据集路径"
+                name="dataset_path"
+                rules={[{ required: true, message: '请输入 harbor 数据集路径' }]}
+                extra="harbor 数据集目录，将自动解析 task 子目录获取镜像列表"
+              >
+                <Input placeholder="/path/to/harbor/dataset" />
+              </Form.Item>
+              <Form.Item>
+                <Button icon={<SearchOutlined />} onClick={handleParseDataset} loading={parsing}>
+                  解析预览
+                </Button>
+              </Form.Item>
+              {harborPreview.length > 0 && (
+                <Form.Item label={`预览（${harborPreview.length} 个任务）`}>
+                  <Table
+                    dataSource={harborPreview}
+                    rowKey="task_name"
+                    size="small"
+                    pagination={false}
+                    scroll={{ y: 300 }}
+                    columns={[
+                      { title: 'Task', dataIndex: 'task_name', key: 'task_name' },
+                      { title: 'Base Image', dataIndex: 'base_image', key: 'base_image', ellipsis: true },
+                      {
+                        title: '类型',
+                        key: 'type',
+                        width: 120,
+                        render: (_: unknown, r: HarborTaskPreview) =>
+                          r.has_docker_image ? 'Prebuilt' : r.has_dockerfile ? 'Dockerfile' : '-',
+                      },
+                    ]}
+                  />
+                </Form.Item>
+              )}
+            </>
+          ) : (
+            <Form.Item
+              label="Base 镜像列表"
+              name="base_images"
+              rules={[{ required: true, message: '请输入至少一个 base 镜像' }]}
+              extra={selectedAgent && !selectedAgent.has_versions
+                ? "每行一个镜像地址，将直接拉取并打上新 tag 推送"
+                : "每行一个镜像地址"
+              }
+            >
+              <TextArea
+                rows={4}
+                placeholder={"ubuntu:22.04\ndebian:bookworm\nnikolaik/python-nodejs:python3.12-nodejs22"}
+              />
+            </Form.Item>
+          )}
 
           <Form.Item
             label="推送目标 (push_dir)"
@@ -207,7 +275,7 @@ export default function TaskCreate() {
             <Input placeholder="例如: registry.sensecore.tech/ccr-sandbox-swe" />
           </Form.Item>
 
-          {selectedAgent?.has_versions !== false && (
+          {!isHarbor && selectedAgent?.has_versions !== false && (
             <Form.Item
               label="Docker Build 参数"
               name="build_args"

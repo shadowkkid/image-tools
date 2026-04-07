@@ -28,6 +28,14 @@ AGENTS: dict = {
         "has_versions": False,
         "build_mode": "retag",
     },
+    "harbor": {
+        "has_versions": False,
+        "build_mode": "harbor",
+        "envd_binary_path": os.environ.get(
+            "IMAGE_TOOLS_ENVD_BINARY",
+            "/home/SENSETIME/lizimu/workspace/python/testTerminus/envd",
+        ),
+    },
 }
 
 
@@ -54,4 +62,5 @@ def get_agent_config(agent: str, agent_version: str = "") -> dict:
             "deps_image": agent_def.get("deps_image", ""),
             "source_dir": agent_def.get("source_dir", ""),
             "build_mode": build_mode,
+            "envd_binary_path": agent_def.get("envd_binary_path", ""),
         }

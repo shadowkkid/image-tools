@@ -64,7 +64,9 @@ def init_db(db_path: str | None = None) -> str:
                 dataset TEXT NOT NULL DEFAULT '',
                 agent TEXT NOT NULL DEFAULT '',
                 agent_version TEXT NOT NULL DEFAULT '',
-                build_mode TEXT NOT NULL DEFAULT 'build'
+                build_mode TEXT NOT NULL DEFAULT 'build',
+                dataset_path TEXT NOT NULL DEFAULT '',
+                envd_binary_path TEXT NOT NULL DEFAULT ''
             );
 
             CREATE TABLE IF NOT EXISTS images (
@@ -77,6 +79,10 @@ def init_db(db_path: str | None = None) -> str:
                 error_message TEXT,
                 started_at TEXT,
                 finished_at TEXT,
+                template_name TEXT NOT NULL DEFAULT '',
+                harbor_task_name TEXT NOT NULL DEFAULT '',
+                harbor_dockerfile_path TEXT NOT NULL DEFAULT '',
+                harbor_docker_image TEXT NOT NULL DEFAULT '',
                 FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE
             );
 
@@ -121,12 +127,21 @@ def init_db(db_path: str | None = None) -> str:
             conn.execute("ALTER TABLE tasks ADD COLUMN agent_version TEXT NOT NULL DEFAULT ''")
         if "build_mode" not in task_cols:
             conn.execute("ALTER TABLE tasks ADD COLUMN build_mode TEXT NOT NULL DEFAULT 'build'")
+        if "dataset_path" not in task_cols:
+            conn.execute("ALTER TABLE tasks ADD COLUMN dataset_path TEXT NOT NULL DEFAULT ''")
+        if "envd_binary_path" not in task_cols:
+            conn.execute("ALTER TABLE tasks ADD COLUMN envd_binary_path TEXT NOT NULL DEFAULT ''")
 
         ds_cols = {row["name"] for row in conn.execute("PRAGMA table_info(datasets)").fetchall()}
         if "agent" not in ds_cols:
             conn.execute("ALTER TABLE datasets ADD COLUMN agent TEXT NOT NULL DEFAULT ''")
         if "agent_version" not in ds_cols:
             conn.execute("ALTER TABLE datasets ADD COLUMN agent_version TEXT NOT NULL DEFAULT ''")
+
+        img_cols = {row["name"] for row in conn.execute("PRAGMA table_info(images)").fetchall()}
+        for col in ("template_name", "harbor_task_name", "harbor_dockerfile_path", "harbor_docker_image"):
+            if col not in img_cols:
+                conn.execute(f"ALTER TABLE images ADD COLUMN {col} TEXT NOT NULL DEFAULT ''")
 
         conn.commit()
     finally:
@@ -176,13 +191,16 @@ def save_task(task: BuildTask, db_path: str | None = None) -> None:
             task.agent,
             task.agent_version,
             task.build_mode,
+            task.dataset_path,
+            task.envd_binary_path,
         )
         if existing:
             conn.execute(
                 """UPDATE tasks SET
                        task_name=?, deps_image=?, push_dir=?, base_images=?, build_args=?,
                        retry_count=?, concurrency=?, source_dir=?, status=?, created_at=?,
-                       finished_at=?, dataset=?, agent=?, agent_version=?, build_mode=?
+                       finished_at=?, dataset=?, agent=?, agent_version=?, build_mode=?,
+                       dataset_path=?, envd_binary_path=?
                    WHERE task_id = ?""",
                 task_params + (task.task_id,),
             )
@@ -191,8 +209,9 @@ def save_task(task: BuildTask, db_path: str | None = None) -> None:
                 """INSERT INTO tasks
                    (task_name, deps_image, push_dir, base_images, build_args,
                     retry_count, concurrency, source_dir, status, created_at,
-                    finished_at, dataset, agent, agent_version, build_mode, task_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    finished_at, dataset, agent, agent_version, build_mode,
+                    dataset_path, envd_binary_path, task_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 task_params + (task.task_id,),
             )
 
@@ -201,8 +220,9 @@ def save_task(task: BuildTask, db_path: str | None = None) -> None:
             cursor = conn.execute(
                 """INSERT INTO images
                    (task_id, base_image, target_image, status, retry_attempts,
-                    error_message, started_at, finished_at)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                    error_message, started_at, finished_at,
+                    template_name, harbor_task_name, harbor_dockerfile_path, harbor_docker_image)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     task.task_id,
                     img.base_image,
@@ -212,6 +232,10 @@ def save_task(task: BuildTask, db_path: str | None = None) -> None:
                     img.error_message,
                     _dt_to_str(img.started_at),
                     _dt_to_str(img.finished_at),
+                    img.template_name,
+                    img.harbor_task_name,
+                    img.harbor_dockerfile_path,
+                    img.harbor_docker_image,
                 ),
             )
             image_id = cursor.lastrowid
@@ -261,6 +285,8 @@ def load_all_tasks(db_path: str | None = None) -> dict[str, BuildTask]:
                 concurrency=row["concurrency"],
                 source_dir=row["source_dir"],
                 build_mode=row["build_mode"] if "build_mode" in row.keys() else "build",
+                dataset_path=row["dataset_path"] if "dataset_path" in row.keys() else "",
+                envd_binary_path=row["envd_binary_path"] if "envd_binary_path" in row.keys() else "",
                 task_id=row["task_id"],
                 status=TaskStatus(row["status"]),
                 images=[],
@@ -282,6 +308,10 @@ def load_all_tasks(db_path: str | None = None) -> dict[str, BuildTask]:
                     error_message=img_row["error_message"],
                     started_at=_str_to_dt(img_row["started_at"]),
                     finished_at=_str_to_dt(img_row["finished_at"]),
+                    template_name=img_row["template_name"] if "template_name" in img_row.keys() else "",
+                    harbor_task_name=img_row["harbor_task_name"] if "harbor_task_name" in img_row.keys() else "",
+                    harbor_dockerfile_path=img_row["harbor_dockerfile_path"] if "harbor_dockerfile_path" in img_row.keys() else "",
+                    harbor_docker_image=img_row["harbor_docker_image"] if "harbor_docker_image" in img_row.keys() else "",
                 )
 
                 # Load stages from DB and replace the defaults from __post_init__

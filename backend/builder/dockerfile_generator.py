@@ -24,3 +24,8 @@ class DockerfileGenerator:
             deps_image=deps_image,
             extra_deps=extra_deps or "",
         )
+
+    def generate_envd(self, original_image: str) -> str:
+        """Render Dockerfile.envd.j2 template for envd injection layer."""
+        template = self.env.get_template("Dockerfile.envd.j2")
+        return template.render(original_image=original_image)

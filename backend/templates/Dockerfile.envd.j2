@@ -1,0 +1,26 @@
+FROM {{ original_image }}
+
+# Terminus-2 deps: tmux + script (bsdutils) + asciinema
+RUN DEBIAN_FRONTEND=noninteractive apt-get update && \
+    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+        tmux \
+        asciinema \
+        bsdutils \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy envd binary (e2b infra daemon)
+COPY envd /usr/local/bin/envd
+RUN chmod +x /usr/local/bin/envd
+
+EXPOSE 49983
+
+# Wrap the real sleep binary so that "command: [sleep, inf]" from k8s
+# transparently starts envd before sleeping.
+RUN mv /usr/bin/sleep /usr/bin/sleep.real && \
+    printf '#!/bin/bash\nif ! pgrep -x envd >/dev/null 2>&1; then\n  envd -port 49983 -isnotfc &\nfi\nexec /usr/bin/sleep.real "$@"\n' > /usr/bin/sleep && \
+    chmod +x /usr/bin/sleep
+
+# Keep entrypoint.sh for non-k8s / local docker run usage
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]
