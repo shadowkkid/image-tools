@@ -29,12 +29,16 @@ AGENTS: dict = {
         "build_mode": "retag",
     },
     "harbor": {
-        "has_versions": False,
+        "has_versions": True,
         "build_mode": "harbor",
-        "envd_binary_path": os.environ.get(
-            "IMAGE_TOOLS_ENVD_BINARY",
-            "/home/SENSETIME/lizimu/workspace/python/testTerminus/envd",
-        ),
+        "versions": {
+            "terminus2": {
+                "envd_binary_path": os.environ.get(
+                    "IMAGE_TOOLS_ENVD_BINARY",
+                    "/home/SENSETIME/lizimu/workspace/python/testTerminus/envd",
+                ),
+            },
+        },
     },
 }
 
