@@ -167,7 +167,7 @@ class ExportFailedImagesResponse(BaseModel):
 # ---- Harbor Dataset ----
 
 class ParseDatasetRequest(BaseModel):
-    dataset_path: str
+    dataset_ref: str
 
 
 class HarborTaskPreview(BaseModel):
@@ -180,3 +180,4 @@ class HarborTaskPreview(BaseModel):
 class ParseDatasetResponse(BaseModel):
     tasks: list[HarborTaskPreview]
     total: int
+    dataset_path: str = ""

@@ -155,3 +155,13 @@ class TestExtractFromLine:
         df = tmp_path / "Dockerfile"
         df.write_text("RUN echo hello\n")
         assert _extract_from_line(df) == ""
+
+    def test_platform_flag(self, tmp_path):
+        df = tmp_path / "Dockerfile"
+        df.write_text("FROM --platform=linux/amd64 ubuntu:22.04\n")
+        assert _extract_from_line(df) == "ubuntu:22.04"
+
+    def test_platform_with_as(self, tmp_path):
+        df = tmp_path / "Dockerfile"
+        df.write_text("FROM --platform=linux/amd64 golang:1.21 AS builder\n")
+        assert _extract_from_line(df) == "golang:1.21"

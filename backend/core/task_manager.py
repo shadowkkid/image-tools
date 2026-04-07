@@ -136,13 +136,13 @@ class TaskManager:
             # Harbor mode: parse dataset to get task environments
             from backend.builder.harbor_dataset_parser import (
                 compute_template_name,
-                parse_harbor_dataset,
+                resolve_and_parse,
             )
 
             if not dataset_path:
-                raise ValueError("Harbor agent requires a dataset_path")
+                raise ValueError("Harbor agent requires a dataset_path (local path or dataset@version)")
 
-            harbor_tasks = parse_harbor_dataset(dataset_path)
+            local_path, harbor_tasks = resolve_and_parse(dataset_path)
 
             task = BuildTask(
                 task_name=task_name,
@@ -156,7 +156,7 @@ class TaskManager:
                 retry_count=retry_count,
                 source_dir="",
                 build_mode=build_mode,
-                dataset_path=dataset_path,
+                dataset_path=local_path,
                 envd_binary_path=envd_binary_path,
                 concurrency=max(1, concurrency),
             )

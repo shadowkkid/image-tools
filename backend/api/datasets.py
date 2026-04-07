@@ -112,11 +112,14 @@ async def batch_delete_images(dataset_id: int, req: BatchDeleteRequest):
 
 @router.post("/harbor/parse-dataset", response_model=ParseDatasetResponse)
 async def parse_harbor_dataset_endpoint(req: ParseDatasetRequest):
-    """Parse a harbor dataset directory and return task previews."""
-    from backend.builder.harbor_dataset_parser import parse_harbor_dataset
+    """Parse a harbor dataset and return task previews.
+
+    Accepts either a dataset@version ref or a local path.
+    """
+    from backend.builder.harbor_dataset_parser import resolve_and_parse
 
     try:
-        tasks = parse_harbor_dataset(req.dataset_path)
+        local_path, tasks = resolve_and_parse(req.dataset_ref)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -131,4 +134,5 @@ async def parse_harbor_dataset_endpoint(req: ParseDatasetRequest):
             for t in tasks
         ],
         total=len(tasks),
+        dataset_path=local_path,
     )

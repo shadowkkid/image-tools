@@ -29,6 +29,7 @@ export default function TaskCreate() {
   const [selectedAgent, setSelectedAgent] = useState<AgentInfo | null>(null);
   const [harborPreview, setHarborPreview] = useState<HarborTaskPreview[]>([]);
   const [parsing, setParsing] = useState(false);
+  const [resolvedDatasetPath, setResolvedDatasetPath] = useState('');
 
   const isHarbor = selectedAgent?.name === 'harbor';
 
@@ -64,6 +65,7 @@ export default function TaskCreate() {
     const agent = agents.find((a) => a.name === agentName) || null;
     setSelectedAgent(agent);
     setHarborPreview([]);
+    setResolvedDatasetPath('');
     form.setFieldsValue({ agent_version: undefined });
     // Auto-select if only one version
     if (agent?.has_versions && agent.versions.length === 1) {
@@ -72,18 +74,19 @@ export default function TaskCreate() {
   };
 
   const handleParseDataset = async () => {
-    const datasetPath = form.getFieldValue('dataset_path');
-    if (!datasetPath) {
-      message.warning('请先输入数据集路径');
+    const datasetRef = form.getFieldValue('dataset_ref');
+    if (!datasetRef) {
+      message.warning('请先输入数据集');
       return;
     }
     setParsing(true);
     try {
-      const res = await parseHarborDataset(datasetPath);
+      const res = await parseHarborDataset(datasetRef);
       setHarborPreview(res.tasks);
+      setResolvedDatasetPath(res.dataset_path);
       message.success(`解析到 ${res.total} 个任务`);
     } catch {
-      message.error('解析数据集失败');
+      message.error('解析数据集失败，请检查数据集名称');
     } finally {
       setParsing(false);
     }
@@ -138,7 +141,7 @@ export default function TaskCreate() {
       build_args: buildArgs,
       retry_count: (values.retry_count as number) ?? 0,
       concurrency: (values.concurrency as number) ?? 1,
-      dataset_path: isHarborAgent ? (values.dataset_path as string) || '' : undefined,
+      dataset_path: isHarborAgent ? (resolvedDatasetPath || (values.dataset_ref as string) || '') : undefined,
     });
 
     message.success(`任务 "${res.task_name}" 已创建`);
@@ -215,12 +218,12 @@ export default function TaskCreate() {
           {isHarbor ? (
             <>
               <Form.Item
-                label="数据集路径"
-                name="dataset_path"
-                rules={[{ required: true, message: '请输入 harbor 数据集路径' }]}
-                extra="harbor 数据集目录，将自动解析 task 子目录获取镜像列表"
+                label="Harbor 数据集"
+                name="dataset_ref"
+                rules={[{ required: true, message: '请输入 harbor 数据集' }]}
+                extra="格式: dataset@version（如 hello-world@1.0），也支持本地路径"
               >
-                <Input placeholder="/path/to/harbor/dataset" />
+                <Input placeholder="hello-world@1.0" />
               </Form.Item>
               <Form.Item>
                 <Button icon={<SearchOutlined />} onClick={handleParseDataset} loading={parsing}>

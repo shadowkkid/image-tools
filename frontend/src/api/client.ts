@@ -105,9 +105,9 @@ export async function deleteDataset(datasetId: number): Promise<{ success: boole
 }
 
 export async function parseHarborDataset(
-  datasetPath: string
-): Promise<{ tasks: HarborTaskPreview[]; total: number }> {
-  const { data } = await api.post('/harbor/parse-dataset', { dataset_path: datasetPath });
+  datasetRef: string
+): Promise<{ tasks: HarborTaskPreview[]; total: number; dataset_path: string }> {
+  const { data } = await api.post('/harbor/parse-dataset', { dataset_ref: datasetRef });
   return data;
 }
 
