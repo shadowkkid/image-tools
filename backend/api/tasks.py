@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 
 from backend.api.schemas import (
     CreateTaskRequest,
@@ -44,10 +44,18 @@ async def list_tasks():
 
 
 @router.get("/{task_id}", response_model=TaskDetail)
-async def get_task(task_id: str):
+async def get_task(
+    task_id: str,
+    image_page: int = Query(1, ge=1),
+    image_page_size: int = Query(500, ge=1, le=2000),
+):
     task = task_manager.get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+
+    start = (image_page - 1) * image_page_size
+    end = start + image_page_size
+    paginated_images = task.images[start:end]
 
     return TaskDetail(
         task_id=task.task_id,
@@ -68,7 +76,7 @@ async def get_task(task_id: str):
         total_images=task.total_images,
         completed_images=task.completed_images,
         failed_images=task.failed_images,
-        images=[_to_image_detail(img) for img in task.images],
+        images=[_to_image_detail(img) for img in paginated_images],
     )
 
 

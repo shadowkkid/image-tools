@@ -62,8 +62,11 @@ export async function listTasks(): Promise<{ tasks: TaskSummary[] }> {
   return data;
 }
 
-export async function getTask(taskId: string): Promise<TaskDetailData> {
-  const { data } = await api.get(`/tasks/${taskId}`);
+export async function getTask(
+  taskId: string,
+  params: { image_page?: number; image_page_size?: number } = {}
+): Promise<TaskDetailData> {
+  const { data } = await api.get(`/tasks/${taskId}`, { params });
   return data;
 }
 

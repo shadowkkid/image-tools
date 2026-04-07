@@ -69,12 +69,14 @@ export default function TaskDetail() {
   const navigate = useNavigate();
   const [task, setTask] = useState<TaskDetailData | null>(null);
   const [loading, setLoading] = useState(false);
+  const [imagePage, setImagePage] = useState(1);
+  const imagePageSize = 500;
 
-  const fetchTask = async () => {
+  const fetchTask = async (page?: number) => {
     if (!taskId) return;
     setLoading(true);
     try {
-      const data = await getTask(taskId);
+      const data = await getTask(taskId, { image_page: page ?? imagePage, image_page_size: imagePageSize });
       setTask(data);
     } finally {
       setLoading(false);
@@ -83,9 +85,9 @@ export default function TaskDetail() {
 
   useEffect(() => {
     fetchTask();
-    const timer = setInterval(fetchTask, 3000);
+    const timer = setInterval(() => fetchTask(), 3000);
     return () => clearInterval(timer);
-  }, [taskId]);
+  }, [taskId, imagePage]);
 
   if (!task && loading) {
     return <Spin size="large" style={{ display: 'block', margin: '100px auto' }} />;
@@ -277,7 +279,7 @@ export default function TaskDetail() {
         <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/tasks')}>
           返回列表
         </Button>
-        <Button icon={<ReloadOutlined />} onClick={fetchTask} loading={loading}>
+        <Button icon={<ReloadOutlined />} onClick={() => fetchTask()} loading={loading}>
           刷新
         </Button>
         {isRunning && (
@@ -335,7 +337,13 @@ export default function TaskDetail() {
           dataSource={task.images}
           columns={imageColumns}
           rowKey="base_image"
-          pagination={false}
+          pagination={{
+            current: imagePage,
+            pageSize: imagePageSize,
+            total: task.total_images,
+            showTotal: (total) => `共 ${total} 个镜像`,
+            onChange: (page) => { setImagePage(page); fetchTask(page); },
+          }}
           expandable={{ expandedRowRender }}
         />
       </Card>
