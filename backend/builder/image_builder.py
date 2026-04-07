@@ -314,7 +314,7 @@ class ImageBuilder:
         self, image_info: ImageBuildInfo, task: BuildTask
     ) -> None:
         """Execute harbor two-stage pipeline: build/pull original → inject envd → tag → push."""
-        safe_name = image_info.harbor_task_name or image_info.base_image.replace("/", "_").replace(":", "_")
+        safe_name = (image_info.harbor_task_name or image_info.base_image.replace("/", "_").replace(":", "_")).lower()
         original_tag = f"image-tools-harbor/{safe_name}:original"
         envd_tag = f"image-tools-harbor/{safe_name}:envd"
         push_succeeded = False
