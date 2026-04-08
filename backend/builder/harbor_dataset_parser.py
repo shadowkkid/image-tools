@@ -130,7 +130,7 @@ def _extract_from_line(dockerfile_path: Path) -> str:
 
 def _is_dataset_ref(value: str) -> bool:
     """Check if value looks like a dataset@version ref rather than a local path."""
-    return not value.startswith("/") and not value.startswith(".")
+    return not Path(value).is_absolute() and not value.startswith(".")
 
 
 def download_harbor_dataset(dataset_ref: str, overwrite: bool = False) -> str:
