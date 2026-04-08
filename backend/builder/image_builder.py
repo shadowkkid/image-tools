@@ -427,7 +427,6 @@ class ImageBuilder:
             await self.docker_service.remove_image(envd_tag)
             if push_succeeded:
                 await self.docker_service.remove_image(image_info.target_image)
-            await self.docker_service.prune_build_cache()
 
     async def _cleanup_images(
         self, build_tag: str, target_image: str, push_succeeded: bool
@@ -444,8 +443,6 @@ class ImageBuilder:
         if push_succeeded:
             await self.docker_service.remove_image(target_image)
 
-        # Prune BuildKit build cache to prevent disk bloat
-        await self.docker_service.prune_build_cache()
 
     def _get_stage(self, image_info: ImageBuildInfo, stage_name: StageName):
         for stage in image_info.stages:

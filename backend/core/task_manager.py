@@ -360,6 +360,13 @@ class TaskManager:
                 await self._cleanup_task_images(task)
             except Exception as e:
                 logger.warning(f"Image cleanup failed: {e}")
+            # Prune BuildKit cache once per task (not per image) to avoid
+            # destroying shared apt/layer caches during concurrent builds.
+            if task.build_mode in ("build", "harbor"):
+                try:
+                    await DockerService.prune_build_cache()
+                except Exception as e:
+                    logger.warning(f"Build cache prune failed: {e}")
 
         # Determine final task status
         task.finished_at = datetime.now()

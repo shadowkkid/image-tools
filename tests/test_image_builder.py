@@ -267,8 +267,8 @@ class TestImageCleanup:
         assert "image-tools-build/" in mock_remove.call_args.args[0]
 
     @pytest.mark.asyncio
-    async def test_cleanup_calls_prune_build_cache(self, task, image_info, shared_dir):
-        """After cleanup, prune_build_cache should be called to prevent disk bloat."""
+    async def test_cleanup_does_not_prune_build_cache_per_image(self, task, image_info, shared_dir):
+        """prune_build_cache should NOT be called per-image; it runs once at task level."""
         task.retry_count = 0
         builder = ImageBuilder()
 
@@ -289,4 +289,4 @@ class TestImageCleanup:
                           return_value=(True, "Pruned")) as mock_prune_cache:
             await builder.build_image(image_info, task, shared_dir)
 
-        mock_prune_cache.assert_called_once()
+        mock_prune_cache.assert_not_called()
