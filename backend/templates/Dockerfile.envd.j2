@@ -1,12 +1,14 @@
 FROM {{ original_image }}
 
 # Terminus-2 deps: tmux + script (bsdutils) + asciinema
-RUN DEBIAN_FRONTEND=noninteractive apt-get update && \
+# Use BuildKit cache mounts to share apt cache across all envd builds
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    DEBIAN_FRONTEND=noninteractive apt-get update && \
     DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
         tmux \
         asciinema \
-        bsdutils \
-    && rm -rf /var/lib/apt/lists/*
+        bsdutils
 
 # Copy envd binary (e2b infra daemon)
 COPY envd /usr/local/bin/envd

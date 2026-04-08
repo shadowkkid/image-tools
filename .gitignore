@@ -24,3 +24,6 @@ backend/data/
 # Temp
 *.tmp
 /tmp/
+
+# OMC
+.omc/
