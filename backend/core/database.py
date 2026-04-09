@@ -115,6 +115,10 @@ def init_db(db_path: str | None = None) -> str:
                 FOREIGN KEY (dataset_id) REFERENCES datasets(id) ON DELETE CASCADE,
                 FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE
             );
+
+            CREATE INDEX IF NOT EXISTS idx_images_task_id ON images(task_id);
+            CREATE INDEX IF NOT EXISTS idx_stages_image_id ON stages(image_id);
+            CREATE INDEX IF NOT EXISTS idx_dataset_images_dataset_id ON dataset_images(dataset_id);
         """)
 
         # Migrations for existing databases
