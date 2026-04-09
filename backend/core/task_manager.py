@@ -136,6 +136,7 @@ class TaskManager:
             # Harbor mode: parse dataset to get task environments
             from backend.builder.harbor_dataset_parser import (
                 compute_template_name,
+                extract_dataset_name,
                 resolve_and_parse,
             )
 
@@ -143,6 +144,7 @@ class TaskManager:
                 raise ValueError("Harbor agent requires a dataset_path (local path or dataset@version)")
 
             local_path, harbor_tasks = resolve_and_parse(dataset_path)
+            ds_name = extract_dataset_name(local_path)
 
             # Filter by base_images if specified (e.g. retry failed images only)
             if base_images:
@@ -168,7 +170,7 @@ class TaskManager:
 
             for ht in harbor_tasks:
                 target_image = _compute_target_image(push_dir, ht.base_image)
-                tmpl_name = compute_template_name(ht.task_name, ht.base_image)
+                tmpl_name = compute_template_name(ds_name, ht.task_name, ht.task_dir)
                 task.images.append(
                     ImageBuildInfo(
                         base_image=ht.base_image,

@@ -1,5 +1,6 @@
 import hashlib
 import logging
+import os
 import re
 import shutil
 import subprocess
@@ -98,14 +99,35 @@ def parse_harbor_dataset(dataset_path: str) -> list[HarborTaskInfo]:
     return tasks
 
 
-def compute_template_name(task_name: str, base_image: str) -> str:
-    """Compute e2b-style template name from task name and base image.
+def compute_template_name(dataset_name: str, task_name: str, task_dir: str) -> str:
+    """Compute e2b-style template name matching harbor's naming convention.
 
-    Format: {task_name}__{sha256(base_image)[:8]} with / → __ and . → -
+    Format: {dataset_name}__{task_name}__{dirhash(environment_dir, 'sha256')[:8]}
+    with . → -
     """
-    hash_suffix = hashlib.sha256(base_image.encode()).hexdigest()[:8]
-    raw = f"{task_name}__{hash_suffix}"
-    return raw.replace("/", "__").replace(".", "-")
+    from dirhash import dirhash
+
+    env_dir = os.path.join(task_dir, "environment")
+    if os.path.isdir(env_dir):
+        hash_suffix = dirhash(env_dir, "sha256")[:8]
+    else:
+        hash_suffix = hashlib.sha256(task_name.encode()).hexdigest()[:8]
+    raw = f"{dataset_name}__{task_name}__{hash_suffix}"
+    return raw.replace(".", "-")
+
+
+def extract_dataset_name(dataset_path: str) -> str:
+    """Extract dataset name (without version) from a dataset path.
+
+    For downloaded datasets: /path/to/terminal-bench-2.0 → terminal-bench
+    For local paths: use directory basename, strip trailing -version if present.
+    """
+    basename = os.path.basename(dataset_path.rstrip("/"))
+    # Strip trailing version suffix like -2.0, -1.0.3, -head
+    m = re.match(r"^(.+?)-([\d]+[\d.]*|head)$", basename)
+    if m:
+        return m.group(1)
+    return basename
 
 
 def _extract_from_line(dockerfile_path: Path) -> str:
