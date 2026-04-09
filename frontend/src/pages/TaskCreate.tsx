@@ -30,6 +30,7 @@ export default function TaskCreate() {
   const [harborPreview, setHarborPreview] = useState<HarborTaskPreview[]>([]);
   const [parsing, setParsing] = useState(false);
   const [resolvedDatasetPath, setResolvedDatasetPath] = useState('');
+  const [retryBaseImages, setRetryBaseImages] = useState<string[]>([]);
 
   const isHarbor = selectedAgent?.name === 'harbor';
 
@@ -58,6 +59,11 @@ export default function TaskCreate() {
         const a = agents.find((ag) => ag.name === state.agent);
         if (a) setSelectedAgent(a);
       }
+      // Store retry base_images in React state (form store drops unrendered fields)
+      if (state.base_images && typeof state.base_images === 'string') {
+        const images = (state.base_images as string).split('\n').map(s => s.trim()).filter(Boolean);
+        if (images.length > 0) setRetryBaseImages(images);
+      }
     }
   }, [agents]);
 
@@ -82,13 +88,10 @@ export default function TaskCreate() {
     setParsing(true);
     try {
       const res = await parseHarborDataset(datasetRef);
-      // Filter by base_images if present (retry failed images scenario)
-      const baseImagesStr = form.getFieldValue('base_images') as string | undefined;
       let tasks = res.tasks;
-      if (baseImagesStr) {
-        const allowSet = new Set(
-          baseImagesStr.split('\n').map((s: string) => s.trim()).filter(Boolean),
-        );
+      // Filter by retryBaseImages if present (retry failed images scenario)
+      if (retryBaseImages.length > 0) {
+        const allowSet = new Set(retryBaseImages);
         tasks = tasks.filter((t) => allowSet.has(t.base_image));
       }
       setHarborPreview(tasks);
@@ -127,13 +130,12 @@ export default function TaskCreate() {
 
   const doCreateTask = async (values: Record<string, unknown>) => {
     const isHarborAgent = values.agent === 'harbor';
-    // Read base_images from form store directly — validateFields() excludes unrendered fields
-    const baseImagesStr = (form.getFieldValue('base_images') as string) || (values.base_images as string) || '';
-    const baseImagesRaw = baseImagesStr
-      .split('\n')
-      .map((s: string) => s.trim())
-      .filter(Boolean);
-    const baseImages = isHarborAgent && baseImagesRaw.length === 0 ? [] : baseImagesRaw;
+    const baseImages = isHarborAgent
+      ? retryBaseImages
+      : ((values.base_images as string) || '')
+          .split('\n')
+          .map((s: string) => s.trim())
+          .filter(Boolean);
     const buildArgs = values.build_args
       ? (values.build_args as string)
           .split('\n')
