@@ -127,7 +127,9 @@ export default function TaskCreate() {
 
   const doCreateTask = async (values: Record<string, unknown>) => {
     const isHarborAgent = values.agent === 'harbor';
-    const baseImagesRaw = (values.base_images as string || '')
+    // Read base_images from form store directly — validateFields() excludes unrendered fields
+    const baseImagesStr = (form.getFieldValue('base_images') as string) || (values.base_images as string) || '';
+    const baseImagesRaw = baseImagesStr
       .split('\n')
       .map((s: string) => s.trim())
       .filter(Boolean);
