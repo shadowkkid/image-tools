@@ -248,7 +248,7 @@ export default function TaskCreate() {
                     dataSource={harborPreview}
                     rowKey="task_name"
                     size="small"
-                    pagination={false}
+                    pagination={{ pageSize: 50, showTotal: (total) => `共 ${total} 个任务`, size: 'small' }}
                     scroll={{ y: 300 }}
                     columns={[
                       { title: 'Task', dataIndex: 'task_name', key: 'task_name' },
