@@ -377,14 +377,14 @@ class ImageBuilder:
 
                 # Write entrypoint.sh
                 entrypoint_content = (
-                    "#!/bin/bash\n"
+                    "#!/bin/sh\n"
                     "set -e\n"
                     "\n"
                     "# Start envd (e2b infra daemon) in background\n"
                     "envd -port 49983 -isnotfc &\n"
                     "\n"
-                    '# Execute the passed command, or default to bash\n'
-                    'exec "${@:-bash}"\n'
+                    '# Execute the passed command, or default to sh\n'
+                    'exec "${@:-sh}"\n'
                 )
                 with open(os.path.join(envd_build_dir, "entrypoint.sh"), "w") as f:
                     f.write(entrypoint_content)
