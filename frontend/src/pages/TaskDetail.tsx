@@ -200,10 +200,28 @@ export default function TaskDetail() {
       message.warning('没有构建成功的镜像');
       return;
     }
-    navigator.clipboard.writeText(successImages).then(
-      () => message.success(`已复制 ${task.images.filter((img) => img.status === 'success').length} 条记录`),
-      () => message.error('复制失败'),
-    );
+    const count = task.images.filter((img) => img.status === 'success').length;
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(successImages).then(
+        () => message.success(`已复制 ${count} 条记录`),
+        () => message.error('复制失败'),
+      );
+    } else {
+      // Fallback for non-secure contexts (HTTP)
+      const textarea = document.createElement('textarea');
+      textarea.value = successImages;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      try {
+        document.execCommand('copy');
+        message.success(`已复制 ${count} 条记录`);
+      } catch {
+        message.error('复制失败');
+      }
+      document.body.removeChild(textarea);
+    }
   };
 
   const imageColumns = [
