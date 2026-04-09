@@ -82,9 +82,18 @@ export default function TaskCreate() {
     setParsing(true);
     try {
       const res = await parseHarborDataset(datasetRef);
-      setHarborPreview(res.tasks);
+      // Filter by base_images if present (retry failed images scenario)
+      const baseImagesStr = form.getFieldValue('base_images') as string | undefined;
+      let tasks = res.tasks;
+      if (baseImagesStr) {
+        const allowSet = new Set(
+          baseImagesStr.split('\n').map((s: string) => s.trim()).filter(Boolean),
+        );
+        tasks = tasks.filter((t) => allowSet.has(t.base_image));
+      }
+      setHarborPreview(tasks);
       setResolvedDatasetPath(res.dataset_path);
-      message.success(`解析到 ${res.total} 个任务`);
+      message.success(`解析到 ${tasks.length} 个任务`);
     } catch {
       message.error('解析数据集失败，请检查数据集名称');
     } finally {
@@ -118,12 +127,11 @@ export default function TaskCreate() {
 
   const doCreateTask = async (values: Record<string, unknown>) => {
     const isHarborAgent = values.agent === 'harbor';
-    const baseImages = isHarborAgent
-      ? []
-      : (values.base_images as string)
-          .split('\n')
-          .map((s: string) => s.trim())
-          .filter(Boolean);
+    const baseImagesRaw = (values.base_images as string || '')
+      .split('\n')
+      .map((s: string) => s.trim())
+      .filter(Boolean);
+    const baseImages = isHarborAgent && baseImagesRaw.length === 0 ? [] : baseImagesRaw;
     const buildArgs = values.build_args
       ? (values.build_args as string)
           .split('\n')

@@ -152,6 +152,7 @@ export default function TaskDetail() {
           retry_count: res.retry_count,
           concurrency: res.concurrency,
           dataset_path: res.dataset_path || undefined,
+          dataset_ref: res.dataset_path || undefined,
         },
       });
     } catch {
