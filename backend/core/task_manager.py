@@ -144,6 +144,11 @@ class TaskManager:
 
             local_path, harbor_tasks = resolve_and_parse(dataset_path)
 
+            # Filter by base_images if specified (e.g. retry failed images only)
+            if base_images:
+                base_images_set = set(base_images)
+                harbor_tasks = [ht for ht in harbor_tasks if ht.base_image in base_images_set]
+
             task = BuildTask(
                 task_name=task_name,
                 deps_image="",
