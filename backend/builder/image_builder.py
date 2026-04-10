@@ -17,6 +17,18 @@ from backend.core.task_models import (
 
 logger = logging.getLogger(__name__)
 
+SYNTAX_DIRECTIVE = "# syntax=docker/dockerfile:1\n"
+
+
+def _ensure_syntax_directive(dockerfile_path: str) -> None:
+    """Prepend BuildKit syntax directive if missing, enabling heredoc support."""
+    with open(dockerfile_path, "r") as f:
+        content = f.read()
+    if content.startswith("# syntax="):
+        return
+    with open(dockerfile_path, "w") as f:
+        f.write(SYNTAX_DIRECTIVE + content)
+
 
 def _compute_target_image(push_dir: str, base_image: str) -> str:
     """Compute the target image name from push_dir and base_image.
@@ -337,6 +349,8 @@ class ImageBuilder:
                 elif image_info.harbor_dockerfile_path:
                     # Build from task's Dockerfile
                     build_context = os.path.dirname(image_info.harbor_dockerfile_path)
+                    # Ensure BuildKit heredoc support (some task Dockerfiles use shell heredocs)
+                    _ensure_syntax_directive(image_info.harbor_dockerfile_path)
                     success, output, _ = await self.docker_service.build(
                         build_context_path=build_context,
                         tags=[original_tag],
