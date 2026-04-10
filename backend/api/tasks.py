@@ -29,6 +29,7 @@ async def create_task(req: CreateTaskRequest):
             retry_count=req.retry_count,
             concurrency=req.concurrency,
             dataset_path=req.dataset_path,
+            harbor_task_names=req.harbor_task_names,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

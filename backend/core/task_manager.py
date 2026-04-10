@@ -120,6 +120,7 @@ class TaskManager:
         retry_count: int = 0,
         concurrency: int = 2,
         dataset_path: str = "",
+        harbor_task_names: list[str] | None = None,
     ) -> BuildTask:
         """Create a new build task and start execution in background."""
         # Resolve agent config
@@ -146,8 +147,11 @@ class TaskManager:
             local_path, harbor_tasks = resolve_and_parse(dataset_path)
             ds_name = extract_dataset_name(local_path)
 
-            # Filter by base_images if specified (e.g. retry failed images only)
-            if base_images:
+            # Filter by harbor_task_names if specified (retry failed images only)
+            if harbor_task_names:
+                names_set = set(harbor_task_names)
+                harbor_tasks = [ht for ht in harbor_tasks if ht.task_name in names_set]
+            elif base_images:
                 base_images_set = set(base_images)
                 harbor_tasks = [ht for ht in harbor_tasks if ht.base_image in base_images_set]
 

@@ -37,6 +37,7 @@ class CreateTaskRequest(BaseModel):
     retry_count: int = 0
     concurrency: int = 2
     dataset_path: str = ""
+    harbor_task_names: list[str] = []
 
 
 class StageDetail(BaseModel):

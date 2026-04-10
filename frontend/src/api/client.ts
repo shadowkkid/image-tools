@@ -50,6 +50,7 @@ export interface CreateTaskParams {
   retry_count?: number;
   concurrency?: number;
   dataset_path?: string;
+  harbor_task_names?: string[];
 }
 
 export async function createTask(params: CreateTaskParams): Promise<TaskSummary> {

@@ -162,6 +162,7 @@ export default function TaskCreate() {
       retry_count: (values.retry_count as number) ?? 0,
       concurrency: (values.concurrency as number) ?? 1,
       dataset_path: isHarborAgent ? (resolvedDatasetPath || (values.dataset_ref as string) || '') : undefined,
+      harbor_task_names: isHarborAgent ? retryHarborTaskNames : undefined,
     });
 
     message.success(`任务 "${res.task_name}" 已创建`);
