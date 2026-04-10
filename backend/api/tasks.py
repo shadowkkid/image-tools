@@ -102,12 +102,18 @@ async def export_failed_images(task_id: str):
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    failed_base_images = [
-        img.base_image for img in task.images
+    failed_images = [
+        img for img in task.images
         if img.status != ImageBuildStatus.SUCCESS
     ]
-    if not failed_base_images:
+    if not failed_images:
         raise HTTPException(status_code=400, detail="该任务没有失败的镜像")
+
+    failed_base_images = [img.base_image for img in failed_images]
+    failed_harbor_task_names = [
+        img.harbor_task_name for img in failed_images
+        if img.harbor_task_name
+    ]
 
     return ExportFailedImagesResponse(
         task_name=f"{task.task_name}-retry",
@@ -120,6 +126,7 @@ async def export_failed_images(task_id: str):
         retry_count=task.retry_count,
         concurrency=task.concurrency,
         dataset_path=task.dataset_path,
+        harbor_task_names=failed_harbor_task_names,
     )
 
 

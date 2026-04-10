@@ -162,6 +162,7 @@ class ExportFailedImagesResponse(BaseModel):
     retry_count: int
     concurrency: int
     dataset_path: str = ""
+    harbor_task_names: list[str] = []
 
 
 # ---- Harbor Dataset ----

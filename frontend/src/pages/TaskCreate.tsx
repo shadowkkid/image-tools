@@ -31,6 +31,7 @@ export default function TaskCreate() {
   const [parsing, setParsing] = useState(false);
   const [resolvedDatasetPath, setResolvedDatasetPath] = useState('');
   const [retryBaseImages, setRetryBaseImages] = useState<string[]>([]);
+  const [retryHarborTaskNames, setRetryHarborTaskNames] = useState<string[]>([]);
 
   const isHarbor = selectedAgent?.name === 'harbor';
 
@@ -64,6 +65,10 @@ export default function TaskCreate() {
         const images = (state.base_images as string).split('\n').map(s => s.trim()).filter(Boolean);
         if (images.length > 0) setRetryBaseImages(images);
       }
+      // Store retry harbor_task_names for harbor mode filtering
+      if (Array.isArray(state.harbor_task_names) && (state.harbor_task_names as string[]).length > 0) {
+        setRetryHarborTaskNames(state.harbor_task_names as string[]);
+      }
     }
   }, [agents]);
 
@@ -89,8 +94,11 @@ export default function TaskCreate() {
     try {
       const res = await parseHarborDataset(datasetRef);
       let tasks = res.tasks;
-      // Filter by retryBaseImages if present (retry failed images scenario)
-      if (retryBaseImages.length > 0) {
+      // Filter by retryHarborTaskNames or retryBaseImages if present (retry failed images scenario)
+      if (retryHarborTaskNames.length > 0) {
+        const allowSet = new Set(retryHarborTaskNames);
+        tasks = tasks.filter((t) => allowSet.has(t.task_name));
+      } else if (retryBaseImages.length > 0) {
         const allowSet = new Set(retryBaseImages);
         tasks = tasks.filter((t) => allowSet.has(t.base_image));
       }

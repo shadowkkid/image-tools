@@ -153,6 +153,7 @@ export default function TaskDetail() {
           concurrency: res.concurrency,
           dataset_path: res.dataset_path || undefined,
           dataset_ref: res.dataset_path || undefined,
+          harbor_task_names: res.harbor_task_names,
         },
       });
     } catch {

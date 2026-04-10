@@ -99,6 +99,7 @@ export interface ExportFailedImagesResponse {
   retry_count: number;
   concurrency: number;
   dataset_path: string;
+  harbor_task_names: string[];
 }
 
 export interface HarborTaskPreview {
