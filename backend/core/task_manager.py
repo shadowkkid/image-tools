@@ -300,6 +300,26 @@ class TaskManager:
             else:
                 logger.info(f"Task [{task.task_name}] {task.build_mode} mode, skipping build context")
 
+            prune_counter = 0
+            prune_lock = asyncio.Lock()
+            PRUNE_EVERY_N = 50
+
+            async def _maybe_prune():
+                nonlocal prune_counter
+                async with prune_lock:
+                    prune_counter += 1
+                    if prune_counter % PRUNE_EVERY_N != 0:
+                        return
+                try:
+                    await DockerService.prune_images()
+                except Exception as e:
+                    logger.debug(f"Periodic prune_images failed: {e}")
+                if task.build_mode == "harbor":
+                    try:
+                        await DockerService.prune_build_cache()
+                    except Exception as e:
+                        logger.debug(f"Periodic prune_build_cache failed: {e}")
+
             async def process_image(img: ImageBuildInfo):
                 try:
                     if task.build_mode == "retag":
@@ -317,6 +337,7 @@ class TaskManager:
                 finally:
                     self._save(task)
                     self._record_dataset_image(task, img)
+                    await _maybe_prune()
 
             if task.concurrency <= 1:
                 for image_info in task.images:
