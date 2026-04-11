@@ -94,11 +94,15 @@ export default function TaskCreate() {
     try {
       const res = await parseHarborDataset(datasetRef);
       let tasks = res.tasks;
-      // Filter by retryHarborTaskNames or retryBaseImages if present (retry failed images scenario)
-      if (retryHarborTaskNames.length > 0) {
+      // Only apply retry filters when the resolved dataset matches the original task's dataset.
+      // If the user changed dataset_ref to a different dataset, filters from the old task don't apply.
+      const state = location.state as Record<string, unknown> | null;
+      const originalDatasetPath = state?.dataset_path as string | undefined;
+      const datasetMatches = originalDatasetPath && res.dataset_path === originalDatasetPath;
+      if (datasetMatches && retryHarborTaskNames.length > 0) {
         const allowSet = new Set(retryHarborTaskNames);
         tasks = tasks.filter((t) => allowSet.has(t.task_name));
-      } else if (retryBaseImages.length > 0) {
+      } else if (datasetMatches && retryBaseImages.length > 0) {
         const allowSet = new Set(retryBaseImages);
         tasks = tasks.filter((t) => allowSet.has(t.base_image));
       }

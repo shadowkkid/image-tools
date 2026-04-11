@@ -126,13 +126,15 @@ export default function TaskDetail() {
       agent_version: task.agent_version,
       dataset: task.dataset,
       push_dir: task.push_dir,
-      base_images: task.images.map((img) => img.base_image).join('\n'),
       build_args: task.build_args.join('\n'),
       retry_count: task.retry_count,
       concurrency: task.concurrency,
     };
     if (isHarbor && task.dataset_path) {
       cloneData.dataset_path = task.dataset_path;
+      cloneData.dataset_ref = task.dataset_path;
+    } else {
+      cloneData.base_images = task.images.map((img) => img.base_image).join('\n');
     }
     navigate('/create', { state: cloneData });
   };
