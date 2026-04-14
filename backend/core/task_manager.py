@@ -136,6 +136,7 @@ class TaskManager:
                 dockerfile_content=dockerfile_content,
                 tag_mode=tag_mode,
                 tag_suffix=tag_suffix,
+                build_args=build_args,
                 retry_count=retry_count,
                 concurrency=concurrency,
             )
@@ -250,6 +251,7 @@ class TaskManager:
         dockerfile_content: str,
         tag_mode: str,
         tag_suffix: str,
+        build_args: list[str] | None = None,
         retry_count: int = 0,
         concurrency: int = 2,
     ) -> BuildTask:
@@ -262,7 +264,7 @@ class TaskManager:
             agent="",
             agent_version="",
             dataset="",
-            build_args=[],
+            build_args=build_args or [],
             retry_count=retry_count,
             build_mode="script",
             dockerfile_content=dockerfile_content,

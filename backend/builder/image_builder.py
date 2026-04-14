@@ -542,6 +542,7 @@ class ImageBuilder:
                 success, output, _ = await self.docker_service.build(
                     build_context_path=build_dir,
                     tags=[build_tag],
+                    build_args=task.build_args if task.build_args else None,
                 )
                 if not success:
                     error_lines = [l for l in output.split("\n") if l.strip() and "ERROR" in l.upper()]

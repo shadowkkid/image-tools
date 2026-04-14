@@ -137,6 +137,7 @@ export default function TaskDetail() {
           dockerfile_content: task.dockerfile_content,
           tag_mode: task.tag_mode,
           tag_suffix: task.tag_suffix,
+          build_args: task.build_args.join('\n'),
           retry_count: task.retry_count,
           concurrency: task.concurrency,
         },

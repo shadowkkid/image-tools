@@ -175,6 +175,12 @@ export default function TaskCreate() {
       .split('\n')
       .map((s: string) => s.trim())
       .filter(Boolean);
+    const buildArgs = values.build_args
+      ? (values.build_args as string)
+          .split('\n')
+          .map((s: string) => s.trim())
+          .filter(Boolean)
+      : [];
 
     const res = await createTask({
       task_name: values.task_name as string,
@@ -187,6 +193,7 @@ export default function TaskCreate() {
       dockerfile_content: values.dockerfile_content as string,
       tag_mode: values.tag_mode as string,
       tag_suffix: values.tag_suffix as string,
+      build_args: buildArgs,
       retry_count: (values.retry_count as number) ?? 0,
       concurrency: (values.concurrency as number) ?? 1,
     });
@@ -381,6 +388,14 @@ export default function TaskCreate() {
 
           {isScript && (
             <>
+              <Form.Item
+                label="Docker Build 参数"
+                name="build_args"
+                extra="每行一个参数，例如: --build-arg=HTTP_PROXY=http://proxy:8080"
+              >
+                <TextArea rows={3} placeholder="--build-arg=HTTP_PROXY=http://proxy:8080&#10;--network=host&#10;--provenance=false" />
+              </Form.Item>
+
               <Form.Item
                 label="Base 镜像列表"
                 name="base_images"
