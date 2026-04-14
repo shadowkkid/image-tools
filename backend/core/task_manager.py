@@ -373,7 +373,7 @@ class TaskManager:
 
             prune_counter = 0
             prune_lock = asyncio.Lock()
-            PRUNE_EVERY_N = 50
+            PRUNE_EVERY_N = 5
 
             async def _maybe_prune():
                 nonlocal prune_counter
@@ -385,7 +385,7 @@ class TaskManager:
                     await DockerService.prune_images()
                 except Exception as e:
                     logger.debug(f"Periodic prune_images failed: {e}")
-                if task.build_mode == "harbor":
+                if task.build_mode in ("build", "harbor", "script"):
                     try:
                         await DockerService.prune_build_cache()
                     except Exception as e:
