@@ -28,16 +28,20 @@ class LoginResponse(BaseModel):
 
 class CreateTaskRequest(BaseModel):
     task_name: str
-    agent: str
+    agent: str = ""
     agent_version: str = ""
-    dataset: str
+    dataset: str = ""
     base_images: list[str] = []
-    push_dir: str
+    push_dir: str = ""
     build_args: list[str] = []
     retry_count: int = 0
     concurrency: int = 2
     dataset_path: str = ""
     harbor_task_names: list[str] = []
+    build_type: str = "opensource"
+    dockerfile_content: str = ""
+    tag_mode: str = ""
+    tag_suffix: str = ""
 
 
 class StageDetail(BaseModel):
@@ -67,6 +71,7 @@ class TaskSummary(BaseModel):
     agent_version: str
     dataset: str
     status: str
+    build_mode: str = "build"
     total_images: int
     completed_images: int
     failed_images: int
@@ -81,12 +86,16 @@ class TaskDetail(BaseModel):
     agent_version: str
     dataset: str
     status: str
+    build_mode: str = "build"
     deps_image: str
     push_dir: str
     build_args: list[str]
     retry_count: int
     concurrency: int
     dataset_path: str = ""
+    dockerfile_content: str = ""
+    tag_mode: str = ""
+    tag_suffix: str = ""
     created_at: str
     finished_at: str | None = None
     elapsed_seconds: float | None = None
@@ -164,6 +173,10 @@ class ExportFailedImagesResponse(BaseModel):
     concurrency: int
     dataset_path: str = ""
     harbor_task_names: list[str] = []
+    build_type: str = "opensource"
+    dockerfile_content: str = ""
+    tag_mode: str = ""
+    tag_suffix: str = ""
 
 
 # ---- Harbor Dataset ----

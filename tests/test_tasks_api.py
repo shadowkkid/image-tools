@@ -96,3 +96,76 @@ class TestExportFailedImages:
 
         assert resp.status_code == 200
         assert resp.json()["base_images"] == ["img-1:latest"]
+
+
+class TestExportFailedImagesScript:
+    def test_export_script_task_includes_script_fields(self, client):
+        """Export failed images for a script task should include script-specific fields."""
+        task = _make_task([ImageBuildStatus.SUCCESS, ImageBuildStatus.FAILED])
+        task.build_mode = "script"
+        task.dockerfile_content = "FROM {{BASE_IMAGE}}\nRUN echo hello"
+        task.tag_mode = "append"
+        task.tag_suffix = "-custom"
+
+        with patch("backend.api.tasks.task_manager") as mock_tm:
+            mock_tm.get_task.return_value = task
+            resp = client.get(f"/api/tasks/{task.task_id}/failed-images")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["build_type"] == "script"
+        assert data["dockerfile_content"] == "FROM {{BASE_IMAGE}}\nRUN echo hello"
+        assert data["tag_mode"] == "append"
+        assert data["tag_suffix"] == "-custom"
+
+    def test_export_opensource_task_default_fields(self, client):
+        """Export failed images for an opensource task should have default script fields."""
+        task = _make_task([ImageBuildStatus.SUCCESS, ImageBuildStatus.FAILED])
+
+        with patch("backend.api.tasks.task_manager") as mock_tm:
+            mock_tm.get_task.return_value = task
+            resp = client.get(f"/api/tasks/{task.task_id}/failed-images")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["build_type"] == "opensource"
+        assert data["dockerfile_content"] == ""
+        assert data["tag_mode"] == ""
+        assert data["tag_suffix"] == ""
+
+
+class TestGetTaskDetail:
+    def test_get_task_includes_build_mode(self, client):
+        """GET /tasks/:id should include build_mode in the response."""
+        task = _make_task([ImageBuildStatus.SUCCESS])
+        task.build_mode = "script"
+        task.dockerfile_content = "FROM {{BASE_IMAGE}}"
+        task.tag_mode = "replace"
+        task.tag_suffix = "v2"
+
+        with patch("backend.api.tasks.task_manager") as mock_tm:
+            mock_tm.get_task.return_value = task
+            resp = client.get(f"/api/tasks/{task.task_id}")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["build_mode"] == "script"
+        assert data["dockerfile_content"] == "FROM {{BASE_IMAGE}}"
+        assert data["tag_mode"] == "replace"
+        assert data["tag_suffix"] == "v2"
+
+
+class TestListTasks:
+    def test_list_tasks_includes_build_mode(self, client):
+        """GET /tasks should include build_mode in task summaries."""
+        task = _make_task([ImageBuildStatus.SUCCESS])
+        task.build_mode = "script"
+
+        with patch("backend.api.tasks.task_manager") as mock_tm:
+            mock_tm.list_tasks.return_value = [task]
+            resp = client.get("/api/tasks")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["tasks"]) == 1
+        assert data["tasks"][0]["build_mode"] == "script"

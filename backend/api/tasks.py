@@ -30,6 +30,10 @@ async def create_task(req: CreateTaskRequest):
             concurrency=req.concurrency,
             dataset_path=req.dataset_path,
             harbor_task_names=req.harbor_task_names,
+            build_type=req.build_type,
+            dockerfile_content=req.dockerfile_content,
+            tag_mode=req.tag_mode,
+            tag_suffix=req.tag_suffix,
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -65,12 +69,16 @@ async def get_task(
         agent_version=task.agent_version,
         dataset=task.dataset,
         status=task.status.value,
+        build_mode=task.build_mode,
         deps_image=task.deps_image,
         push_dir=task.push_dir,
         build_args=task.build_args,
         retry_count=task.retry_count,
         concurrency=task.concurrency,
         dataset_path=task.dataset_path,
+        dockerfile_content=task.dockerfile_content,
+        tag_mode=task.tag_mode,
+        tag_suffix=task.tag_suffix,
         created_at=task.created_at.isoformat(),
         finished_at=task.finished_at.isoformat() if task.finished_at else None,
         elapsed_seconds=task.elapsed_seconds,
@@ -128,6 +136,10 @@ async def export_failed_images(task_id: str):
         concurrency=task.concurrency,
         dataset_path=task.dataset_path,
         harbor_task_names=failed_harbor_task_names,
+        build_type="script" if task.build_mode == "script" else "opensource",
+        dockerfile_content=task.dockerfile_content,
+        tag_mode=task.tag_mode,
+        tag_suffix=task.tag_suffix,
     )
 
 
@@ -139,6 +151,7 @@ def _to_summary(task) -> TaskSummary:
         agent_version=task.agent_version,
         dataset=task.dataset,
         status=task.status.value,
+        build_mode=task.build_mode,
         total_images=task.total_images,
         completed_images=task.completed_images,
         failed_images=task.failed_images,

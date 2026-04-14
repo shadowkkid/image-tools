@@ -1,4 +1,4 @@
-from backend.builder.image_builder import _compute_target_image
+from backend.builder.image_builder import _compute_target_image, _compute_script_target_image
 from backend.core.database import init_db, save_task
 from backend.core.docker_service import DockerService
 from backend.core.task_models import (
@@ -434,3 +434,89 @@ class TestImageRefCounting:
             # remove_image and prune should have been called
             mock_remove.assert_called()
             mock_prune.assert_called()
+
+
+class TestScriptTask:
+    @pytest.mark.asyncio
+    async def test_create_script_task(self, db_path):
+        """Script task should be created with correct build_mode and target images."""
+        manager = _make_manager(db_path)
+
+        with patch.object(manager.image_builder, "script_build_image", new_callable=AsyncMock), \
+             patch("backend.core.task_manager.DockerService.prune_images", new_callable=AsyncMock), \
+             patch("backend.core.task_manager.DockerService.prune_build_cache", new_callable=AsyncMock):
+            task = await manager.create_task(
+                task_name="script-test",
+                agent="",
+                agent_version="",
+                dataset="",
+                base_images=["registry.example.com/repo/ubuntu:22.04", "registry.example.com/repo/debian:bookworm"],
+                push_dir="",
+                build_type="script",
+                dockerfile_content="FROM {{BASE_IMAGE}}\nRUN echo hello",
+                tag_mode="append",
+                tag_suffix="-custom",
+            )
+            await asyncio.sleep(0.2)
+
+        assert task.build_mode == "script"
+        assert task.dockerfile_content == "FROM {{BASE_IMAGE}}\nRUN echo hello"
+        assert task.tag_mode == "append"
+        assert task.tag_suffix == "-custom"
+        assert len(task.images) == 2
+        assert task.images[0].target_image == "registry.example.com/repo/ubuntu:22.04-custom"
+        assert task.images[1].target_image == "registry.example.com/repo/debian:bookworm-custom"
+
+    @pytest.mark.asyncio
+    async def test_create_script_task_replace_mode(self, db_path):
+        """Script task with replace tag mode should use tag_suffix directly."""
+        manager = _make_manager(db_path)
+
+        with patch.object(manager.image_builder, "script_build_image", new_callable=AsyncMock), \
+             patch("backend.core.task_manager.DockerService.prune_images", new_callable=AsyncMock), \
+             patch("backend.core.task_manager.DockerService.prune_build_cache", new_callable=AsyncMock):
+            task = await manager.create_task(
+                task_name="script-replace",
+                agent="",
+                agent_version="",
+                dataset="",
+                base_images=["registry.example.com/repo/ubuntu:22.04"],
+                push_dir="",
+                build_type="script",
+                dockerfile_content="FROM {{BASE_IMAGE}}",
+                tag_mode="replace",
+                tag_suffix="v2.0",
+            )
+            await asyncio.sleep(0.2)
+
+        assert task.images[0].target_image == "registry.example.com/repo/ubuntu:v2.0"
+
+    @pytest.mark.asyncio
+    async def test_script_task_persisted(self, db_path):
+        """Script task should be saved to and restored from DB."""
+        manager = _make_manager(db_path)
+
+        with patch.object(manager.image_builder, "script_build_image", new_callable=AsyncMock), \
+             patch("backend.core.task_manager.DockerService.prune_images", new_callable=AsyncMock), \
+             patch("backend.core.task_manager.DockerService.prune_build_cache", new_callable=AsyncMock):
+            task = await manager.create_task(
+                task_name="script-persist",
+                agent="",
+                agent_version="",
+                dataset="",
+                base_images=["ubuntu:22.04"],
+                push_dir="",
+                build_type="script",
+                dockerfile_content="FROM {{BASE_IMAGE}}\nRUN apt-get update",
+                tag_mode="append",
+                tag_suffix="-patched",
+            )
+            await asyncio.sleep(0.2)
+
+        manager2 = _make_manager(db_path)
+        restored = manager2.get_task(task.task_id)
+        assert restored is not None
+        assert restored.build_mode == "script"
+        assert restored.dockerfile_content == "FROM {{BASE_IMAGE}}\nRUN apt-get update"
+        assert restored.tag_mode == "append"
+        assert restored.tag_suffix == "-patched"

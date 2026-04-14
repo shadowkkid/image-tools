@@ -3,6 +3,7 @@ import pytest
 
 from backend.builder.image_builder import (
     ImageBuilder,
+    _compute_script_target_image,
     _compute_target_image,
     prep_shared_build_context,
 )
@@ -10,6 +11,7 @@ from backend.core.task_models import (
     BuildTask,
     ImageBuildInfo,
     ImageBuildStatus,
+    SCRIPT_BUILD_STAGES,
     StageStatus,
 )
 
@@ -290,3 +292,123 @@ class TestImageCleanup:
             await builder.build_image(image_info, task, shared_dir)
 
         mock_prune_cache.assert_not_called()
+
+
+class TestComputeScriptTargetImage:
+    def test_append_mode(self):
+        result = _compute_script_target_image("registry.example.com/repo/ubuntu:22.04", "append", "-custom")
+        assert result == "registry.example.com/repo/ubuntu:22.04-custom"
+
+    def test_replace_mode(self):
+        result = _compute_script_target_image("registry.example.com/repo/ubuntu:22.04", "replace", "v2.0")
+        assert result == "registry.example.com/repo/ubuntu:v2.0"
+
+    def test_append_no_tag(self):
+        result = _compute_script_target_image("registry.example.com/repo/ubuntu", "append", "-custom")
+        assert result == "registry.example.com/repo/ubuntu:latest-custom"
+
+    def test_replace_no_tag(self):
+        result = _compute_script_target_image("registry.example.com/repo/ubuntu", "replace", "v1")
+        assert result == "registry.example.com/repo/ubuntu:v1"
+
+    def test_append_empty_suffix(self):
+        result = _compute_script_target_image("ubuntu:22.04", "append", "")
+        assert result == "ubuntu:22.04"
+
+    def test_replace_with_complex_image(self):
+        result = _compute_script_target_image(
+            "registry.cn-sh-01.sensecore.cn/ccr-swe/sweb.eval:python3.12",
+            "replace",
+            "patched",
+        )
+        assert result == "registry.cn-sh-01.sensecore.cn/ccr-swe/sweb.eval:patched"
+
+
+class TestScriptBuildPipeline:
+    @pytest.fixture
+    def script_task(self):
+        return BuildTask(
+            task_name="script-test",
+            deps_image="",
+            push_dir="",
+            base_images=["registry.example.com/repo/ubuntu:22.04"],
+            build_mode="script",
+            dockerfile_content="FROM {{BASE_IMAGE}}\nRUN echo hello",
+            tag_mode="append",
+            tag_suffix="-custom",
+        )
+
+    @pytest.fixture
+    def script_image_info(self):
+        return ImageBuildInfo(
+            base_image="registry.example.com/repo/ubuntu:22.04",
+            target_image="registry.example.com/repo/ubuntu:22.04-custom",
+            stage_names=SCRIPT_BUILD_STAGES,
+        )
+
+    @pytest.mark.asyncio
+    async def test_script_build_success(self, script_task, script_image_info):
+        builder = ImageBuilder()
+
+        with patch.object(builder.docker_service, "build",
+                          new_callable=AsyncMock,
+                          return_value=(True, "Build OK", ["Build OK"])), \
+             patch.object(builder.docker_service, "tag",
+                          new_callable=AsyncMock,
+                          return_value=(True, "Tag OK")), \
+             patch.object(builder.docker_service, "push",
+                          new_callable=AsyncMock,
+                          return_value=(True, "Push OK")), \
+             patch.object(builder.docker_service, "remove_image",
+                          new_callable=AsyncMock,
+                          return_value=(True, "Removed")):
+            await builder.script_build_image(script_image_info, script_task)
+
+        assert script_image_info.status == ImageBuildStatus.SUCCESS
+        assert all(s.status == StageStatus.SUCCESS for s in script_image_info.stages)
+
+    @pytest.mark.asyncio
+    async def test_script_build_failure(self, script_task, script_image_info):
+        script_task.retry_count = 0
+        builder = ImageBuilder()
+
+        with patch.object(builder.docker_service, "build",
+                          new_callable=AsyncMock,
+                          return_value=(False, "ERROR: build failed", ["ERROR: build failed"])), \
+             patch.object(builder.docker_service, "remove_image",
+                          new_callable=AsyncMock,
+                          return_value=(True, "Removed")):
+            await builder.script_build_image(script_image_info, script_task)
+
+        assert script_image_info.status == ImageBuildStatus.FAILED
+        assert "docker_build" in (script_image_info.error_message or "")
+
+    @pytest.mark.asyncio
+    async def test_script_build_dockerfile_rendered(self, script_task, script_image_info):
+        """Verify the Dockerfile template is rendered with the actual base image."""
+        builder = ImageBuilder()
+        rendered_content = None
+
+        async def mock_build(build_context_path, tags, **kwargs):
+            nonlocal rendered_content
+            import os
+            dockerfile_path = os.path.join(build_context_path, "Dockerfile")
+            with open(dockerfile_path) as f:
+                rendered_content = f.read()
+            return (True, "Build OK", ["Build OK"])
+
+        with patch.object(builder.docker_service, "build", side_effect=mock_build), \
+             patch.object(builder.docker_service, "tag",
+                          new_callable=AsyncMock,
+                          return_value=(True, "Tag OK")), \
+             patch.object(builder.docker_service, "push",
+                          new_callable=AsyncMock,
+                          return_value=(True, "Push OK")), \
+             patch.object(builder.docker_service, "remove_image",
+                          new_callable=AsyncMock,
+                          return_value=(True, "Removed")):
+            await builder.script_build_image(script_image_info, script_task)
+
+        assert rendered_content is not None
+        assert "FROM registry.example.com/repo/ubuntu:22.04" in rendered_content
+        assert "{{BASE_IMAGE}}" not in rendered_content

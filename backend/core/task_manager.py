@@ -6,6 +6,7 @@ from datetime import datetime
 from backend.builder.image_builder import (
     ImageBuilder,
     _compute_build_image_tag,
+    _compute_script_target_image,
     _compute_target_image,
     prep_shared_build_context,
 )
@@ -18,6 +19,7 @@ from backend.core.task_models import (
     ImageBuildStatus,
     HARBOR_STAGES,
     RETAG_STAGES,
+    SCRIPT_BUILD_STAGES,
     StageStatus,
     TaskStatus,
 )
@@ -121,8 +123,23 @@ class TaskManager:
         concurrency: int = 2,
         dataset_path: str = "",
         harbor_task_names: list[str] | None = None,
+        build_type: str = "opensource",
+        dockerfile_content: str = "",
+        tag_mode: str = "",
+        tag_suffix: str = "",
     ) -> BuildTask:
         """Create a new build task and start execution in background."""
+        if build_type == "script":
+            return await self._create_script_task(
+                task_name=task_name,
+                base_images=base_images,
+                dockerfile_content=dockerfile_content,
+                tag_mode=tag_mode,
+                tag_suffix=tag_suffix,
+                retry_count=retry_count,
+                concurrency=concurrency,
+            )
+
         # Resolve agent config
         agent_cfg = get_agent_config(agent, agent_version)
         deps_image = agent_cfg.get("deps_image", "")
@@ -221,6 +238,54 @@ class TaskManager:
         self._save(task)
 
         # Start background execution
+        bg_task = asyncio.create_task(self._execute_task(task))
+        self._async_tasks[task.task_id] = bg_task
+
+        return task
+
+    async def _create_script_task(
+        self,
+        task_name: str,
+        base_images: list[str],
+        dockerfile_content: str,
+        tag_mode: str,
+        tag_suffix: str,
+        retry_count: int = 0,
+        concurrency: int = 2,
+    ) -> BuildTask:
+        """Create a script-based build task."""
+        task = BuildTask(
+            task_name=task_name,
+            deps_image="",
+            push_dir="",
+            base_images=base_images,
+            agent="",
+            agent_version="",
+            dataset="",
+            build_args=[],
+            retry_count=retry_count,
+            build_mode="script",
+            dockerfile_content=dockerfile_content,
+            tag_mode=tag_mode,
+            tag_suffix=tag_suffix,
+            concurrency=max(1, concurrency),
+        )
+
+        for base_image in base_images:
+            target_image = _compute_script_target_image(base_image, tag_mode, tag_suffix)
+            task.images.append(
+                ImageBuildInfo(
+                    base_image=base_image,
+                    target_image=target_image,
+                    stage_names=SCRIPT_BUILD_STAGES,
+                )
+            )
+
+        async with self._lock:
+            self.tasks[task.task_id] = task
+
+        self._save(task)
+
         bg_task = asyncio.create_task(self._execute_task(task))
         self._async_tasks[task.task_id] = bg_task
 
@@ -330,6 +395,8 @@ class TaskManager:
                         await self.image_builder.retag_image(img, task)
                     elif task.build_mode == "harbor":
                         await self.image_builder.harbor_build_image(img, task)
+                    elif task.build_mode == "script":
+                        await self.image_builder.script_build_image(img, task)
                     else:
                         await self.image_builder.build_image(
                             img, task, shared_build_dir
@@ -394,7 +461,7 @@ class TaskManager:
                 logger.warning(f"Image cleanup failed: {e}")
             # Prune BuildKit cache once per task (not per image) to avoid
             # destroying shared apt/layer caches during concurrent builds.
-            if task.build_mode in ("build", "harbor"):
+            if task.build_mode in ("build", "harbor", "script"):
                 try:
                     await DockerService.prune_build_cache()
                 except Exception as e:

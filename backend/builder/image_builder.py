@@ -19,6 +19,8 @@ logger = logging.getLogger(__name__)
 
 SYNTAX_DIRECTIVE = "# syntax=docker/dockerfile:1\n"
 
+SCRIPT_BASE_IMAGE_PLACEHOLDER = "{{BASE_IMAGE}}"
+
 
 def _ensure_syntax_directive(dockerfile_path: str) -> None:
     """Prepend BuildKit syntax directive if missing, enabling heredoc support."""
@@ -74,6 +76,28 @@ def _compute_build_image_tag(push_dir: str, base_image: str) -> str:
         flat_name = image_part.replace("/", "_")
         return f"image-tools-build/{flat_name}:{tag}"
     return f"image-tools-build/{rest}"
+
+
+def _compute_script_target_image(base_image: str, tag_mode: str, tag_suffix: str) -> str:
+    """Compute target image for script build mode.
+
+    The image name (registry/path) stays the same as the base image.
+    Tag is computed based on tag_mode:
+      - "append": old_tag + tag_suffix (e.g. "22.04" + "-custom" -> "22.04-custom")
+      - "replace": tag_suffix directly (e.g. "custom")
+    """
+    if ":" in base_image:
+        image_path, old_tag = base_image.rsplit(":", 1)
+    else:
+        image_path = base_image
+        old_tag = "latest"
+
+    if tag_mode == "append":
+        new_tag = f"{old_tag}{tag_suffix}"
+    else:
+        new_tag = tag_suffix
+
+    return f"{image_path}:{new_tag}"
 
 
 def prep_shared_build_context(source_dir: str) -> str:
@@ -165,6 +189,22 @@ class ImageBuilder:
         finally:
             image_info.finished_at = datetime.now()
 
+    async def script_build_image(
+        self, image_info: ImageBuildInfo, task: BuildTask
+    ) -> None:
+        """Execute script build pipeline: render Dockerfile template → build → tag → push."""
+        image_info.status = ImageBuildStatus.BUILDING
+        image_info.started_at = datetime.now()
+
+        try:
+            await self._run_script_with_retry(image_info, task)
+        except Exception as e:
+            image_info.status = ImageBuildStatus.FAILED
+            image_info.error_message = str(e)
+            logger.error(f"Script build failed for {image_info.base_image}: {e}")
+        finally:
+            image_info.finished_at = datetime.now()
+
     async def _run_with_retry(
         self, image_info: ImageBuildInfo, task: BuildTask, shared_build_dir: str
     ) -> None:
@@ -253,6 +293,40 @@ class ImageBuilder:
 
             try:
                 await self._execute_harbor_pipeline(image_info, task)
+                image_info.status = ImageBuildStatus.SUCCESS
+                return
+            except _StageError as e:
+                image_info.error_message = f"Stage [{e.stage.value}] failed: {e.message}"
+                if attempt < max_attempts - 1:
+                    logger.warning(
+                        f"Attempt {attempt + 1} failed for {image_info.base_image}: {e.message}"
+                    )
+                    continue
+                else:
+                    image_info.status = ImageBuildStatus.FAILED
+                    logger.error(
+                        f"All {max_attempts} attempts failed for {image_info.base_image}"
+                    )
+
+    async def _run_script_with_retry(
+        self, image_info: ImageBuildInfo, task: BuildTask
+    ) -> None:
+        max_attempts = task.retry_count + 1
+
+        for attempt in range(max_attempts):
+            if attempt > 0:
+                image_info.retry_attempts = attempt
+                for stage in image_info.stages:
+                    stage.status = StageStatus.PENDING
+                    stage.started_at = None
+                    stage.finished_at = None
+                    stage.error_message = None
+                logger.info(
+                    f"Retry {attempt}/{task.retry_count} for {image_info.base_image}"
+                )
+
+            try:
+                await self._execute_script_pipeline(image_info, task)
                 image_info.status = ImageBuildStatus.SUCCESS
                 return
             except _StageError as e:
@@ -439,6 +513,61 @@ class ImageBuilder:
             # Clean up local Docker images
             await self.docker_service.remove_image(original_tag)
             await self.docker_service.remove_image(envd_tag)
+            if push_succeeded:
+                await self.docker_service.remove_image(image_info.target_image)
+
+    async def _execute_script_pipeline(
+        self, image_info: ImageBuildInfo, task: BuildTask
+    ) -> None:
+        """Execute script build pipeline: render Dockerfile → build → tag → push."""
+        safe_name = image_info.base_image.replace("/", "_").replace(":", "_").lower()
+        build_tag = f"image-tools-script/{safe_name}:build"
+        push_succeeded = False
+        build_dir = None
+
+        try:
+            # Stage 1: Docker build from rendered Dockerfile template
+            stage = self._start_stage(image_info, StageName.DOCKER_BUILD)
+            try:
+                build_dir = tempfile.mkdtemp(prefix="image-tools-script-")
+
+                # Render Dockerfile by replacing placeholder with actual base image
+                rendered = task.dockerfile_content.replace(
+                    SCRIPT_BASE_IMAGE_PLACEHOLDER, image_info.base_image
+                )
+                dockerfile_path = os.path.join(build_dir, "Dockerfile")
+                with open(dockerfile_path, "w") as f:
+                    f.write(rendered)
+
+                success, output, _ = await self.docker_service.build(
+                    build_context_path=build_dir,
+                    tags=[build_tag],
+                )
+                if not success:
+                    error_lines = [l for l in output.split("\n") if l.strip() and "ERROR" in l.upper()]
+                    error_msg = "\n".join(error_lines[-5:]) if error_lines else output[-2000:]
+                    self._finish_stage(stage, False, error_msg)
+                    raise _StageError(StageName.DOCKER_BUILD, error_msg)
+
+                self._finish_stage(stage, True)
+            except _StageError:
+                raise
+            except Exception as e:
+                self._finish_stage(stage, False, str(e))
+                raise _StageError(StageName.DOCKER_BUILD, str(e))
+
+            # Stage 2: Docker tag
+            await self._stage_docker_tag(image_info, build_tag, image_info.target_image)
+
+            # Stage 3: Docker push
+            await self._stage_docker_push(image_info, image_info.target_image)
+            push_succeeded = True
+        finally:
+            # Clean up temp dir
+            if build_dir:
+                shutil.rmtree(build_dir, ignore_errors=True)
+            # Clean up local Docker images
+            await self.docker_service.remove_image(build_tag)
             if push_succeeded:
                 await self.docker_service.remove_image(image_info.target_image)
 

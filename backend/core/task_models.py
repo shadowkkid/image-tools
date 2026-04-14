@@ -58,6 +58,12 @@ HARBOR_STAGES = [
     StageName.DOCKER_PUSH,
 ]
 
+SCRIPT_BUILD_STAGES = [
+    StageName.DOCKER_BUILD,
+    StageName.DOCKER_TAG,
+    StageName.DOCKER_PUSH,
+]
+
 
 @dataclass
 class StageInfo:
@@ -127,6 +133,9 @@ class BuildTask:
     build_mode: str = "build"
     dataset_path: str = ""
     envd_binary_path: str = ""
+    dockerfile_content: str = ""
+    tag_mode: str = ""
+    tag_suffix: str = ""
     task_id: str = field(default_factory=lambda: str(uuid.uuid4()))
     status: TaskStatus = TaskStatus.PENDING
     images: list[ImageBuildInfo] = field(default_factory=list)
