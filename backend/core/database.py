@@ -66,7 +66,10 @@ def init_db(db_path: str | None = None) -> str:
                 agent_version TEXT NOT NULL DEFAULT '',
                 build_mode TEXT NOT NULL DEFAULT 'build',
                 dataset_path TEXT NOT NULL DEFAULT '',
-                envd_binary_path TEXT NOT NULL DEFAULT ''
+                envd_binary_path TEXT NOT NULL DEFAULT '',
+                dockerfile_content TEXT NOT NULL DEFAULT '',
+                tag_mode TEXT NOT NULL DEFAULT '',
+                tag_suffix TEXT NOT NULL DEFAULT ''
             );
 
             CREATE TABLE IF NOT EXISTS images (
@@ -115,6 +118,10 @@ def init_db(db_path: str | None = None) -> str:
                 FOREIGN KEY (dataset_id) REFERENCES datasets(id) ON DELETE CASCADE,
                 FOREIGN KEY (task_id) REFERENCES tasks(task_id) ON DELETE CASCADE
             );
+
+            CREATE INDEX IF NOT EXISTS idx_images_task_id ON images(task_id);
+            CREATE INDEX IF NOT EXISTS idx_stages_image_id ON stages(image_id);
+            CREATE INDEX IF NOT EXISTS idx_dataset_images_dataset_id ON dataset_images(dataset_id);
         """)
 
         # Migrations for existing databases
@@ -131,6 +138,12 @@ def init_db(db_path: str | None = None) -> str:
             conn.execute("ALTER TABLE tasks ADD COLUMN dataset_path TEXT NOT NULL DEFAULT ''")
         if "envd_binary_path" not in task_cols:
             conn.execute("ALTER TABLE tasks ADD COLUMN envd_binary_path TEXT NOT NULL DEFAULT ''")
+        if "dockerfile_content" not in task_cols:
+            conn.execute("ALTER TABLE tasks ADD COLUMN dockerfile_content TEXT NOT NULL DEFAULT ''")
+        if "tag_mode" not in task_cols:
+            conn.execute("ALTER TABLE tasks ADD COLUMN tag_mode TEXT NOT NULL DEFAULT ''")
+        if "tag_suffix" not in task_cols:
+            conn.execute("ALTER TABLE tasks ADD COLUMN tag_suffix TEXT NOT NULL DEFAULT ''")
 
         ds_cols = {row["name"] for row in conn.execute("PRAGMA table_info(datasets)").fetchall()}
         if "agent" not in ds_cols:
@@ -193,6 +206,9 @@ def save_task(task: BuildTask, db_path: str | None = None) -> None:
             task.build_mode,
             task.dataset_path,
             task.envd_binary_path,
+            task.dockerfile_content,
+            task.tag_mode,
+            task.tag_suffix,
         )
         if existing:
             conn.execute(
@@ -200,7 +216,8 @@ def save_task(task: BuildTask, db_path: str | None = None) -> None:
                        task_name=?, deps_image=?, push_dir=?, base_images=?, build_args=?,
                        retry_count=?, concurrency=?, source_dir=?, status=?, created_at=?,
                        finished_at=?, dataset=?, agent=?, agent_version=?, build_mode=?,
-                       dataset_path=?, envd_binary_path=?
+                       dataset_path=?, envd_binary_path=?,
+                       dockerfile_content=?, tag_mode=?, tag_suffix=?
                    WHERE task_id = ?""",
                 task_params + (task.task_id,),
             )
@@ -210,8 +227,9 @@ def save_task(task: BuildTask, db_path: str | None = None) -> None:
                    (task_name, deps_image, push_dir, base_images, build_args,
                     retry_count, concurrency, source_dir, status, created_at,
                     finished_at, dataset, agent, agent_version, build_mode,
-                    dataset_path, envd_binary_path, task_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    dataset_path, envd_binary_path,
+                    dockerfile_content, tag_mode, tag_suffix, task_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 task_params + (task.task_id,),
             )
 
@@ -287,6 +305,9 @@ def load_all_tasks(db_path: str | None = None) -> dict[str, BuildTask]:
                 build_mode=row["build_mode"] if "build_mode" in row.keys() else "build",
                 dataset_path=row["dataset_path"] if "dataset_path" in row.keys() else "",
                 envd_binary_path=row["envd_binary_path"] if "envd_binary_path" in row.keys() else "",
+                dockerfile_content=row["dockerfile_content"] if "dockerfile_content" in row.keys() else "",
+                tag_mode=row["tag_mode"] if "tag_mode" in row.keys() else "",
+                tag_suffix=row["tag_suffix"] if "tag_suffix" in row.keys() else "",
                 task_id=row["task_id"],
                 status=TaskStatus(row["status"]),
                 images=[],

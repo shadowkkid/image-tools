@@ -119,24 +119,36 @@ class TestParseHarborDataset:
 
 
 class TestComputeTemplateName:
-    def test_basic(self):
-        result = compute_template_name("my-task", "ubuntu:22.04")
-        assert result.startswith("my-task__")
+    def test_basic(self, tmp_path):
+        env_dir = tmp_path / "my-task" / "environment"
+        env_dir.mkdir(parents=True)
+        (env_dir / "Dockerfile").write_text("FROM ubuntu:22.04\n")
+        result = compute_template_name("my-dataset", "my-task", str(tmp_path / "my-task"))
+        assert result.startswith("my-dataset__my-task__")
         assert len(result.split("__")[-1]) == 8
 
-    def test_deterministic(self):
-        r1 = compute_template_name("task", "python:3.11")
-        r2 = compute_template_name("task", "python:3.11")
+    def test_deterministic(self, tmp_path):
+        env_dir = tmp_path / "task" / "environment"
+        env_dir.mkdir(parents=True)
+        (env_dir / "Dockerfile").write_text("FROM python:3.11\n")
+        r1 = compute_template_name("ds", "task", str(tmp_path / "task"))
+        r2 = compute_template_name("ds", "task", str(tmp_path / "task"))
         assert r1 == r2
 
-    def test_different_images_different_names(self):
-        r1 = compute_template_name("task", "python:3.11")
-        r2 = compute_template_name("task", "python:3.12")
+    def test_different_envs_different_names(self, tmp_path):
+        for name, content in [("t1", "FROM python:3.11\n"), ("t2", "FROM python:3.12\n")]:
+            env_dir = tmp_path / name / "environment"
+            env_dir.mkdir(parents=True)
+            (env_dir / "Dockerfile").write_text(content)
+        r1 = compute_template_name("ds", "t1", str(tmp_path / "t1"))
+        r2 = compute_template_name("ds", "t2", str(tmp_path / "t2"))
         assert r1 != r2
 
-    def test_replaces_slash_and_dot(self):
-        result = compute_template_name("org/sub.task", "image:latest")
-        assert "/" not in result
+    def test_replaces_dot(self, tmp_path):
+        env_dir = tmp_path / "sub.task" / "environment"
+        env_dir.mkdir(parents=True)
+        (env_dir / "Dockerfile").write_text("FROM image:latest\n")
+        result = compute_template_name("org", "sub.task", str(tmp_path / "sub.task"))
         assert "." not in result
 
 

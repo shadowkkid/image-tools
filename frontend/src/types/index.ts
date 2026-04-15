@@ -25,6 +25,7 @@ export interface TaskSummary {
   agent_version: string;
   dataset: string;
   status: string;
+  build_mode: string;
   total_images: number;
   completed_images: number;
   failed_images: number;
@@ -39,12 +40,16 @@ export interface TaskDetailData {
   agent_version: string;
   dataset: string;
   status: string;
+  build_mode: string;
   deps_image: string;
   push_dir: string;
   build_args: string[];
   retry_count: number;
   concurrency: number;
   dataset_path: string;
+  dockerfile_content: string;
+  tag_mode: string;
+  tag_suffix: string;
   created_at: string;
   finished_at: string | null;
   elapsed_seconds: number | null;
@@ -99,6 +104,11 @@ export interface ExportFailedImagesResponse {
   retry_count: number;
   concurrency: number;
   dataset_path: string;
+  harbor_task_names: string[];
+  build_type: string;
+  dockerfile_content: string;
+  tag_mode: string;
+  tag_suffix: string;
 }
 
 export interface HarborTaskPreview {

@@ -50,6 +50,11 @@ export interface CreateTaskParams {
   retry_count?: number;
   concurrency?: number;
   dataset_path?: string;
+  harbor_task_names?: string[];
+  build_type?: string;
+  dockerfile_content?: string;
+  tag_mode?: string;
+  tag_suffix?: string;
 }
 
 export async function createTask(params: CreateTaskParams): Promise<TaskSummary> {

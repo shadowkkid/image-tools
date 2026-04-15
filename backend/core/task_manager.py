@@ -6,6 +6,7 @@ from datetime import datetime
 from backend.builder.image_builder import (
     ImageBuilder,
     _compute_build_image_tag,
+    _compute_script_target_image,
     _compute_target_image,
     prep_shared_build_context,
 )
@@ -18,6 +19,7 @@ from backend.core.task_models import (
     ImageBuildStatus,
     HARBOR_STAGES,
     RETAG_STAGES,
+    SCRIPT_BUILD_STAGES,
     StageStatus,
     TaskStatus,
 )
@@ -120,8 +122,25 @@ class TaskManager:
         retry_count: int = 0,
         concurrency: int = 2,
         dataset_path: str = "",
+        harbor_task_names: list[str] | None = None,
+        build_type: str = "opensource",
+        dockerfile_content: str = "",
+        tag_mode: str = "",
+        tag_suffix: str = "",
     ) -> BuildTask:
         """Create a new build task and start execution in background."""
+        if build_type == "script":
+            return await self._create_script_task(
+                task_name=task_name,
+                base_images=base_images,
+                dockerfile_content=dockerfile_content,
+                tag_mode=tag_mode,
+                tag_suffix=tag_suffix,
+                build_args=build_args,
+                retry_count=retry_count,
+                concurrency=concurrency,
+            )
+
         # Resolve agent config
         agent_cfg = get_agent_config(agent, agent_version)
         deps_image = agent_cfg.get("deps_image", "")
@@ -136,6 +155,7 @@ class TaskManager:
             # Harbor mode: parse dataset to get task environments
             from backend.builder.harbor_dataset_parser import (
                 compute_template_name,
+                extract_dataset_name,
                 resolve_and_parse,
             )
 
@@ -143,6 +163,15 @@ class TaskManager:
                 raise ValueError("Harbor agent requires a dataset_path (local path or dataset@version)")
 
             local_path, harbor_tasks = resolve_and_parse(dataset_path)
+            ds_name = extract_dataset_name(local_path)
+
+            # Filter by harbor_task_names if specified (retry failed images only)
+            if harbor_task_names:
+                names_set = set(harbor_task_names)
+                harbor_tasks = [ht for ht in harbor_tasks if ht.task_name in names_set]
+            elif base_images:
+                base_images_set = set(base_images)
+                harbor_tasks = [ht for ht in harbor_tasks if ht.base_image in base_images_set]
 
             task = BuildTask(
                 task_name=task_name,
@@ -162,8 +191,8 @@ class TaskManager:
             )
 
             for ht in harbor_tasks:
-                target_image = _compute_target_image(push_dir, ht.base_image)
-                tmpl_name = compute_template_name(ht.task_name, ht.base_image)
+                tmpl_name = compute_template_name(ds_name, ht.task_name, ht.task_dir)
+                target_image = f"{push_dir.rstrip('/')}/{tmpl_name}:latest".lower()
                 task.images.append(
                     ImageBuildInfo(
                         base_image=ht.base_image,
@@ -210,6 +239,55 @@ class TaskManager:
         self._save(task)
 
         # Start background execution
+        bg_task = asyncio.create_task(self._execute_task(task))
+        self._async_tasks[task.task_id] = bg_task
+
+        return task
+
+    async def _create_script_task(
+        self,
+        task_name: str,
+        base_images: list[str],
+        dockerfile_content: str,
+        tag_mode: str,
+        tag_suffix: str,
+        build_args: list[str] | None = None,
+        retry_count: int = 0,
+        concurrency: int = 2,
+    ) -> BuildTask:
+        """Create a script-based build task."""
+        task = BuildTask(
+            task_name=task_name,
+            deps_image="",
+            push_dir="",
+            base_images=base_images,
+            agent="",
+            agent_version="",
+            dataset="",
+            build_args=build_args or [],
+            retry_count=retry_count,
+            build_mode="script",
+            dockerfile_content=dockerfile_content,
+            tag_mode=tag_mode,
+            tag_suffix=tag_suffix,
+            concurrency=max(1, concurrency),
+        )
+
+        for base_image in base_images:
+            target_image = _compute_script_target_image(base_image, tag_mode, tag_suffix)
+            task.images.append(
+                ImageBuildInfo(
+                    base_image=base_image,
+                    target_image=target_image,
+                    stage_names=SCRIPT_BUILD_STAGES,
+                )
+            )
+
+        async with self._lock:
+            self.tasks[task.task_id] = task
+
+        self._save(task)
+
         bg_task = asyncio.create_task(self._execute_task(task))
         self._async_tasks[task.task_id] = bg_task
 
@@ -293,12 +371,34 @@ class TaskManager:
             else:
                 logger.info(f"Task [{task.task_name}] {task.build_mode} mode, skipping build context")
 
+            prune_counter = 0
+            prune_lock = asyncio.Lock()
+            PRUNE_EVERY_N = 50
+
+            async def _maybe_prune():
+                nonlocal prune_counter
+                async with prune_lock:
+                    prune_counter += 1
+                    if prune_counter % PRUNE_EVERY_N != 0:
+                        return
+                try:
+                    await DockerService.prune_images()
+                except Exception as e:
+                    logger.debug(f"Periodic prune_images failed: {e}")
+                if task.build_mode in ("build", "harbor", "script"):
+                    try:
+                        await DockerService.prune_build_cache()
+                    except Exception as e:
+                        logger.debug(f"Periodic prune_build_cache failed: {e}")
+
             async def process_image(img: ImageBuildInfo):
                 try:
                     if task.build_mode == "retag":
                         await self.image_builder.retag_image(img, task)
                     elif task.build_mode == "harbor":
                         await self.image_builder.harbor_build_image(img, task)
+                    elif task.build_mode == "script":
+                        await self.image_builder.script_build_image(img, task)
                     else:
                         await self.image_builder.build_image(
                             img, task, shared_build_dir
@@ -310,6 +410,7 @@ class TaskManager:
                 finally:
                     self._save(task)
                     self._record_dataset_image(task, img)
+                    await _maybe_prune()
 
             if task.concurrency <= 1:
                 for image_info in task.images:
@@ -360,6 +461,13 @@ class TaskManager:
                 await self._cleanup_task_images(task)
             except Exception as e:
                 logger.warning(f"Image cleanup failed: {e}")
+            # Prune BuildKit cache once per task (not per image) to avoid
+            # destroying shared apt/layer caches during concurrent builds.
+            if task.build_mode in ("build", "harbor", "script"):
+                try:
+                    await DockerService.prune_build_cache()
+                except Exception as e:
+                    logger.warning(f"Build cache prune failed: {e}")
 
         # Determine final task status
         task.finished_at = datetime.now()

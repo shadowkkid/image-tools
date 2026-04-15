@@ -99,6 +99,14 @@ export default function TaskDetail() {
 
   const isRunning = task.status === 'running';
   const isHarbor = task.agent === 'harbor';
+  const isScript = task.build_mode === 'script';
+
+  const buildModeLabel: Record<string, string> = {
+    build: '开源构建',
+    retag: '重新标记',
+    harbor: 'Harbor 构建',
+    script: '脚本构建',
+  };
 
   const handleStop = () => {
     Modal.confirm({
@@ -120,19 +128,37 @@ export default function TaskDetail() {
   };
 
   const handleClone = () => {
+    if (isScript) {
+      navigate('/create', {
+        state: {
+          task_name: `${task.task_name}-copy`,
+          build_type: 'script',
+          base_images: task.images.map((img) => img.base_image).join('\n'),
+          dockerfile_content: task.dockerfile_content,
+          tag_mode: task.tag_mode,
+          tag_suffix: task.tag_suffix,
+          build_args: task.build_args.join('\n'),
+          retry_count: task.retry_count,
+          concurrency: task.concurrency,
+        },
+      });
+      return;
+    }
     const cloneData: Record<string, unknown> = {
       task_name: `${task.task_name}-copy`,
       agent: task.agent,
       agent_version: task.agent_version,
       dataset: task.dataset,
       push_dir: task.push_dir,
-      base_images: task.images.map((img) => img.base_image).join('\n'),
       build_args: task.build_args.join('\n'),
       retry_count: task.retry_count,
       concurrency: task.concurrency,
     };
     if (isHarbor && task.dataset_path) {
       cloneData.dataset_path = task.dataset_path;
+      cloneData.dataset_ref = task.dataset_path;
+    } else {
+      cloneData.base_images = task.images.map((img) => img.base_image).join('\n');
     }
     navigate('/create', { state: cloneData });
   };
@@ -140,20 +166,28 @@ export default function TaskDetail() {
   const handleRetryFailed = async () => {
     try {
       const res = await exportFailedImages(taskId!);
-      navigate('/create', {
-        state: {
-          task_name: res.task_name,
-          agent: res.agent,
-          agent_version: res.agent_version,
-          dataset: res.dataset,
-          push_dir: res.push_dir,
-          base_images: res.base_images.join('\n'),
-          build_args: res.build_args.join('\n'),
-          retry_count: res.retry_count,
-          concurrency: res.concurrency,
-          dataset_path: res.dataset_path || undefined,
-        },
-      });
+      const state: Record<string, unknown> = {
+        task_name: res.task_name,
+        agent: res.agent,
+        agent_version: res.agent_version,
+        dataset: res.dataset,
+        push_dir: res.push_dir,
+        base_images: res.base_images.join('\n'),
+        build_args: res.build_args.join('\n'),
+        retry_count: res.retry_count,
+        concurrency: res.concurrency,
+      };
+      if (res.build_type === 'script') {
+        state.build_type = 'script';
+        state.dockerfile_content = res.dockerfile_content;
+        state.tag_mode = res.tag_mode;
+        state.tag_suffix = res.tag_suffix;
+      } else {
+        state.dataset_path = res.dataset_path || undefined;
+        state.dataset_ref = res.dataset_path || undefined;
+        state.harbor_task_names = res.harbor_task_names;
+      }
+      navigate('/create', { state });
     } catch {
       message.error('导出失败镜像失败');
     }
@@ -200,10 +234,28 @@ export default function TaskDetail() {
       message.warning('没有构建成功的镜像');
       return;
     }
-    navigator.clipboard.writeText(successImages).then(
-      () => message.success(`已复制 ${task.images.filter((img) => img.status === 'success').length} 条记录`),
-      () => message.error('复制失败'),
-    );
+    const count = task.images.filter((img) => img.status === 'success').length;
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(successImages).then(
+        () => message.success(`已复制 ${count} 条记录`),
+        () => message.error('复制失败'),
+      );
+    } else {
+      // Fallback for non-secure contexts (HTTP)
+      const textarea = document.createElement('textarea');
+      textarea.value = successImages;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      try {
+        document.execCommand('copy');
+        message.success(`已复制 ${count} 条记录`);
+      } catch {
+        message.error('复制失败');
+      }
+      document.body.removeChild(textarea);
+    }
   };
 
   const imageColumns = [
@@ -309,16 +361,31 @@ export default function TaskDetail() {
           <Descriptions.Item label="状态">
             <Tag color={statusColorMap[task.status]}>{statusLabelMap[task.status] || task.status}</Tag>
           </Descriptions.Item>
-          <Descriptions.Item label="Agent">
-            {task.agent}{task.agent_version ? ` / ${task.agent_version}` : ''}
+          <Descriptions.Item label="构建类型">
+            {buildModeLabel[task.build_mode] || task.build_mode}
           </Descriptions.Item>
-          <Descriptions.Item label="数据集">{task.dataset || '-'}</Descriptions.Item>
-          <Descriptions.Item label="推送目标" span={2}>
-            <code>{task.push_dir}</code>
-          </Descriptions.Item>
-          {task.build_args.length > 0 && (
+          {!isScript && (
+            <Descriptions.Item label="Agent">
+              {task.agent}{task.agent_version ? ` / ${task.agent_version}` : ''}
+            </Descriptions.Item>
+          )}
+          {!isScript && (
+            <Descriptions.Item label="数据集">{task.dataset || '-'}</Descriptions.Item>
+          )}
+          {!isScript && (
+            <Descriptions.Item label="推送目标" span={2}>
+              <code>{task.push_dir}</code>
+            </Descriptions.Item>
+          )}
+          {!isScript && task.build_args.length > 0 && (
             <Descriptions.Item label="Build 参数" span={2}>
               <code>{task.build_args.join(' ')}</code>
+            </Descriptions.Item>
+          )}
+          {isScript && (
+            <Descriptions.Item label="Tag 策略">
+              {task.tag_mode === 'append' ? '复用 Tag（追加）' : '更新 Tag（替换）'}
+              {task.tag_suffix ? `：${task.tag_suffix}` : ''}
             </Descriptions.Item>
           )}
           <Descriptions.Item label="重试次数">{task.retry_count}</Descriptions.Item>
