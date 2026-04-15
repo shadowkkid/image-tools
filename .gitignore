@@ -25,5 +25,8 @@ backend/data/
 *.tmp
 /tmp/
 
+# Runtime state
+state/
+
 # OMC
 .omc/
