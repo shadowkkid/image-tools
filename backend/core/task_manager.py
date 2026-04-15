@@ -373,7 +373,7 @@ class TaskManager:
 
             prune_counter = 0
             prune_lock = asyncio.Lock()
-            PRUNE_EVERY_N = 5
+            PRUNE_EVERY_N = 50
 
             async def _maybe_prune():
                 nonlocal prune_counter
