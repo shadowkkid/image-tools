@@ -428,6 +428,7 @@ class ImageBuilder:
                     success, output, _ = await self.docker_service.build(
                         build_context_path=build_context,
                         tags=[original_tag],
+                        build_args=["--network=host"],
                     )
                     if not success:
                         error_lines = [l for l in output.split("\n") if l.strip() and "ERROR" in l.upper()]
@@ -486,6 +487,7 @@ class ImageBuilder:
                 success, output, _ = await self.docker_service.build(
                     build_context_path=envd_build_dir,
                     tags=[envd_tag],
+                    build_args=["--network=host"],
                 )
                 if not success:
                     error_lines = [l for l in output.split("\n") if l.strip() and "ERROR" in l.upper()]
