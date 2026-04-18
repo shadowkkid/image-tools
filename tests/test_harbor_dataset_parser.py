@@ -6,6 +6,7 @@ import pytest
 from backend.builder.harbor_dataset_parser import (
     HarborTaskInfo,
     _extract_from_line,
+    _find_dataset_root,
     compute_template_name,
     parse_harbor_dataset,
 )
@@ -38,6 +39,7 @@ class TestParseHarborDataset:
         assert tasks[0].docker_image == "python:3.11-slim"
         assert tasks[0].base_image == "python:3.11-slim"
         assert tasks[0].dockerfile_path == ""
+        assert tasks[0].task_toml_name == ""
 
     def test_parse_with_dockerfile(self, tmp_path):
         self._make_task_dir(
@@ -119,13 +121,21 @@ class TestParseHarborDataset:
 
 
 class TestComputeTemplateName:
-    def test_basic(self, tmp_path):
+    def test_basic_no_toml_name(self, tmp_path):
         env_dir = tmp_path / "my-task" / "environment"
         env_dir.mkdir(parents=True)
         (env_dir / "Dockerfile").write_text("FROM ubuntu:22.04\n")
         result = compute_template_name("my-dataset", "my-task", str(tmp_path / "my-task"))
-        assert result.startswith("my-dataset__my-task__")
+        assert result.startswith("my-task__")
         assert len(result.split("__")[-1]) == 8
+
+    def test_with_toml_name(self, tmp_path):
+        env_dir = tmp_path / "897" / "environment"
+        env_dir.mkdir(parents=True)
+        (env_dir / "Dockerfile").write_text("FROM ubuntu:22.04\n")
+        result = compute_template_name("seta-env", "897", str(tmp_path / "897"), task_toml_name="camel-ai/897")
+        assert result.startswith("camel-ai__897__")
+        assert "/" not in result
 
     def test_deterministic(self, tmp_path):
         env_dir = tmp_path / "task" / "environment"
@@ -144,12 +154,14 @@ class TestComputeTemplateName:
         r2 = compute_template_name("ds", "t2", str(tmp_path / "t2"))
         assert r1 != r2
 
-    def test_replaces_dot(self, tmp_path):
+    def test_replaces_dot_and_slash(self, tmp_path):
         env_dir = tmp_path / "sub.task" / "environment"
         env_dir.mkdir(parents=True)
         (env_dir / "Dockerfile").write_text("FROM image:latest\n")
-        result = compute_template_name("org", "sub.task", str(tmp_path / "sub.task"))
+        result = compute_template_name("org", "sub.task", str(tmp_path / "sub.task"), task_toml_name="org/sub.task")
         assert "." not in result
+        assert "/" not in result
+        assert result.startswith("org__sub-task__")
 
 
 class TestExtractFromLine:
@@ -177,3 +189,43 @@ class TestExtractFromLine:
         df = tmp_path / "Dockerfile"
         df.write_text("FROM --platform=linux/amd64 golang:1.21 AS builder\n")
         assert _extract_from_line(df) == "golang:1.21"
+
+
+class TestFindDatasetRoot:
+    def test_direct_tasks(self, tmp_path):
+        task_dir = tmp_path / "task-a"
+        task_dir.mkdir()
+        (task_dir / "task.toml").write_text("[environment]\n")
+        assert _find_dataset_root(tmp_path) == tmp_path
+
+    def test_wrapped_tasks(self, tmp_path):
+        wrapper = tmp_path / "seta-env"
+        wrapper.mkdir()
+        task_dir = wrapper / "897"
+        task_dir.mkdir()
+        (task_dir / "task.toml").write_text("[environment]\n")
+        assert _find_dataset_root(tmp_path) == wrapper
+
+    def test_empty_dir(self, tmp_path):
+        assert _find_dataset_root(tmp_path) == tmp_path
+
+
+class TestParseTaskTomlName:
+    def test_task_toml_name_parsed(self, tmp_path):
+        task_dir = tmp_path / "897"
+        task_dir.mkdir()
+        (task_dir / "task.toml").write_text('[task]\nname = "camel-ai/897"\n\n[environment]\ndocker_image = "python:3"\n')
+        env_dir = task_dir / "environment"
+        env_dir.mkdir()
+        (env_dir / "Dockerfile").write_text("FROM python:3\n")
+        tasks = parse_harbor_dataset(str(tmp_path))
+        assert len(tasks) == 1
+        assert tasks[0].task_toml_name == "camel-ai/897"
+        assert tasks[0].task_name == "897"
+
+    def test_no_task_section(self, tmp_path):
+        task_dir = tmp_path / "my-task"
+        task_dir.mkdir()
+        (task_dir / "task.toml").write_text('[environment]\ndocker_image = "alpine"\n')
+        tasks = parse_harbor_dataset(str(tmp_path))
+        assert tasks[0].task_toml_name == ""

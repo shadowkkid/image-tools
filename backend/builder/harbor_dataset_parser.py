@@ -22,6 +22,7 @@ class HarborTaskInfo:
     docker_image: str  # from task.toml [environment].docker_image
     dockerfile_path: str  # path to environment/Dockerfile
     base_image: str  # resolved base image (docker_image or FROM line)
+    task_toml_name: str = ""  # [task].name from task.toml (may include org prefix like "camel-ai/897")
 
 
 def parse_harbor_dataset(dataset_path: str) -> list[HarborTaskInfo]:
@@ -53,11 +54,14 @@ def parse_harbor_dataset(dataset_path: str) -> list[HarborTaskInfo]:
         dockerfile_path = ""
         base_image = ""
 
-        # Parse task.toml for docker_image
+        task_toml_name = ""
+
+        # Parse task.toml for docker_image and task name
         try:
             with open(task_toml, "rb") as f:
                 config = tomllib.load(f)
             docker_image = config.get("environment", {}).get("docker_image", "") or ""
+            task_toml_name = config.get("task", {}).get("name", "") or ""
         except Exception as e:
             logger.warning("Failed to parse %s: %s", task_toml, e)
             continue
@@ -90,6 +94,7 @@ def parse_harbor_dataset(dataset_path: str) -> list[HarborTaskInfo]:
                 docker_image=docker_image,
                 dockerfile_path=dockerfile_path,
                 base_image=base_image,
+                task_toml_name=task_toml_name,
             )
         )
 
@@ -99,11 +104,13 @@ def parse_harbor_dataset(dataset_path: str) -> list[HarborTaskInfo]:
     return tasks
 
 
-def compute_template_name(dataset_name: str, task_name: str, task_dir: str) -> str:
+def compute_template_name(dataset_name: str, task_name: str, task_dir: str, task_toml_name: str = "") -> str:
     """Compute e2b-style template name matching harbor's naming convention.
 
-    Format: {dataset_name}__{task_name}__{dirhash(environment_dir, 'sha256')[:8]}
-    with . → -
+    Harbor e2b format: {task.name}__{dirhash(environment_dir, 'sha256')[:8]}
+    with '/' -> '__' and '.' -> '-'.
+
+    task.name comes from task.toml [task].name, falling back to task_dir basename.
     """
     from dirhash import dirhash
 
@@ -112,8 +119,10 @@ def compute_template_name(dataset_name: str, task_name: str, task_dir: str) -> s
         hash_suffix = dirhash(env_dir, "sha256")[:8]
     else:
         hash_suffix = hashlib.sha256(task_name.encode()).hexdigest()[:8]
-    raw = f"{dataset_name}__{task_name}__{hash_suffix}"
-    return raw.replace(".", "-")
+
+    name_part = task_toml_name if task_toml_name else task_name
+    raw = f"{name_part}__{hash_suffix}"
+    return raw.replace("/", "__").replace(".", "-")
 
 
 def extract_dataset_name(dataset_path: str) -> str:
@@ -128,6 +137,24 @@ def extract_dataset_name(dataset_path: str) -> str:
     if m:
         return m.group(1)
     return basename
+
+
+def _find_dataset_root(path: Path) -> Path:
+    """Find the actual dataset root containing task directories.
+
+    Harbor CLI may create a wrapper subdirectory under the output dir
+    (e.g., output_dir/seta-env/<task_dirs>). When direct children don't
+    have task.toml but a single subdirectory's children do, return that
+    subdirectory.
+    """
+    subdirs = [e for e in path.iterdir() if e.is_dir()]
+    if any((d / "task.toml").exists() for d in subdirs):
+        return path
+    if len(subdirs) == 1:
+        wrapper = subdirs[0]
+        if any((e / "task.toml").exists() for e in wrapper.iterdir() if e.is_dir()):
+            return wrapper
+    return path
 
 
 def _extract_from_line(dockerfile_path: Path) -> str:
@@ -184,7 +211,7 @@ def download_harbor_dataset(dataset_ref: str, overwrite: bool = False) -> str:
         # Verify it has at least one task.toml
         if any(output_dir.rglob("task.toml")):
             logger.info("Using cached dataset at %s", output_dir)
-            return str(output_dir)
+            return str(_find_dataset_root(output_dir))
         # Cache is empty/corrupt, re-download
         shutil.rmtree(output_dir)
 
@@ -208,7 +235,7 @@ def download_harbor_dataset(dataset_ref: str, overwrite: bool = False) -> str:
     if not any(output_dir.rglob("task.toml")):
         raise ValueError(f"Downloaded dataset has no valid tasks: {dataset_ref}")
 
-    return str(output_dir)
+    return str(_find_dataset_root(output_dir))
 
 
 def resolve_and_parse(dataset_ref: str) -> tuple[str, list[HarborTaskInfo]]:
@@ -220,7 +247,7 @@ def resolve_and_parse(dataset_ref: str) -> tuple[str, list[HarborTaskInfo]]:
     if _is_dataset_ref(dataset_ref):
         local_path = download_harbor_dataset(dataset_ref)
     else:
-        local_path = dataset_ref
+        local_path = str(_find_dataset_root(Path(dataset_ref)))
 
     tasks = parse_harbor_dataset(local_path)
     return local_path, tasks

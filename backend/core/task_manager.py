@@ -191,7 +191,7 @@ class TaskManager:
             )
 
             for ht in harbor_tasks:
-                tmpl_name = compute_template_name(ds_name, ht.task_name, ht.task_dir)
+                tmpl_name = compute_template_name(ds_name, ht.task_name, ht.task_dir, ht.task_toml_name)
                 target_image = f"{push_dir.rstrip('/')}/{tmpl_name}:latest".lower()
                 task.images.append(
                     ImageBuildInfo(
