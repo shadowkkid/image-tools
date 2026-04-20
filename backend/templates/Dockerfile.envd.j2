@@ -1,5 +1,7 @@
 FROM {{ original_image }}
 
+USER root
+
 # Terminus-2 deps: tmux + script (bsdutils) + asciinema
 # Best-effort install — these are non-critical for envd functionality.
 # Many task images have broken apt/dpkg state by design, so we must tolerate failures.
