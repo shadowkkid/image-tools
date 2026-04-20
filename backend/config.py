@@ -35,7 +35,7 @@ AGENTS: dict = {
             "terminus2": {
                 "envd_binary_path": os.environ.get(
                     "IMAGE_TOOLS_ENVD_BINARY",
-                    "/home/SENSETIME/lizimu/workspace/python/testTerminus/envd",
+                    os.path.join(os.path.dirname(os.path.dirname(__file__)), "envd"),
                 ),
             },
         },
