@@ -404,6 +404,7 @@ class ImageBuilder:
         original_tag = f"image-tools-harbor/{safe_name}:original"
         envd_tag = f"image-tools-harbor/{safe_name}:envd"
         push_succeeded = False
+        original_build_dir = None
         envd_build_dir = None
 
         try:
@@ -421,10 +422,17 @@ class ImageBuilder:
                         self._finish_stage(stage, False, output)
                         raise _StageError(StageName.DOCKER_BUILD_ORIGINAL, output)
                 elif image_info.harbor_dockerfile_path:
-                    # Build from task's Dockerfile
-                    build_context = os.path.dirname(image_info.harbor_dockerfile_path)
-                    # Ensure BuildKit heredoc support (some task Dockerfiles use shell heredocs)
-                    _ensure_syntax_directive(image_info.harbor_dockerfile_path)
+                    # Copy build context to tempdir to avoid modifying the original dataset files.
+                    # _ensure_syntax_directive writes to the Dockerfile, which would change
+                    # dirhash(environment/) and break template_name on subsequent retry tasks.
+                    src_context = os.path.dirname(image_info.harbor_dockerfile_path)
+                    original_build_dir = tempfile.mkdtemp(prefix="image-tools-harbor-orig-")
+                    build_context = os.path.join(original_build_dir, "context")
+                    shutil.copytree(src_context, build_context)
+                    copied_dockerfile = os.path.join(
+                        build_context, os.path.basename(image_info.harbor_dockerfile_path)
+                    )
+                    _ensure_syntax_directive(copied_dockerfile)
                     success, output, _ = await self.docker_service.build(
                         build_context_path=build_context,
                         tags=[original_tag],
@@ -509,7 +517,9 @@ class ImageBuilder:
             await self._stage_docker_push(image_info, image_info.target_image)
             push_succeeded = True
         finally:
-            # Clean up temp dir
+            # Clean up temp dirs
+            if original_build_dir:
+                shutil.rmtree(original_build_dir, ignore_errors=True)
             if envd_build_dir:
                 shutil.rmtree(envd_build_dir, ignore_errors=True)
             # Clean up local Docker images
