@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import shutil
@@ -20,6 +21,65 @@ logger = logging.getLogger(__name__)
 SYNTAX_DIRECTIVE = "# syntax=docker/dockerfile:1\n"
 
 SCRIPT_BASE_IMAGE_PLACEHOLDER = "{{BASE_IMAGE}}"
+
+RATE_LIMIT_MAX_RETRIES = 5
+
+
+def _is_rate_limit_error(message: str) -> bool:
+    """Check if a build/pull error is caused by Docker Hub rate limiting (429)."""
+    return "429" in message or "Too Many Requests" in message
+
+
+class RateLimitBackoff:
+    """Shared backoff state for concurrent image builds hitting registry rate limits.
+
+    When any worker receives a 429, all workers pause for the backoff period.
+    Backoff doubles on consecutive hits: 30s → 60s → 120s → 240s → 300s (max).
+    """
+
+    def __init__(
+        self, initial_seconds: float = 30.0, max_seconds: float = 300.0
+    ):
+        self._lock = asyncio.Lock()
+        self._resume_at: float = 0  # monotonic timestamp
+        self._current_backoff: float = 0
+        self._initial = initial_seconds
+        self._max = max_seconds
+
+    async def on_rate_limited(self) -> float:
+        """Signal that a 429 was received. Returns the backoff duration."""
+        async with self._lock:
+            now = asyncio.get_event_loop().time()
+            if now < self._resume_at:
+                # Already backing off from another worker, don't extend
+                return self._resume_at - now
+            if self._current_backoff == 0:
+                self._current_backoff = self._initial
+            else:
+                self._current_backoff = min(
+                    self._current_backoff * 2, self._max
+                )
+            self._resume_at = now + self._current_backoff
+            logger.warning(
+                f"Registry rate limit (429). "
+                f"All workers backing off {self._current_backoff:.0f}s"
+            )
+            return self._current_backoff
+
+    async def wait_if_needed(self) -> None:
+        """Wait until the shared backoff period expires."""
+        if self._resume_at <= 0:
+            return
+        now = asyncio.get_event_loop().time()
+        delay = self._resume_at - now
+        if delay > 0:
+            logger.info(f"Rate limit backoff: waiting {delay:.0f}s...")
+            await asyncio.sleep(delay)
+
+    def on_success(self) -> None:
+        """Reduce backoff on successful operation."""
+        if self._current_backoff > self._initial:
+            self._current_backoff /= 2
 
 
 def _ensure_syntax_directive(dockerfile_path: str) -> None:
@@ -142,14 +202,22 @@ class ImageBuilder:
         self.dockerfile_generator = DockerfileGenerator()
 
     async def build_image(
-        self, image_info: ImageBuildInfo, task: BuildTask, shared_build_dir: str
+        self,
+        image_info: ImageBuildInfo,
+        task: BuildTask,
+        shared_build_dir: str,
+        rate_limiter: RateLimitBackoff | None = None,
     ) -> None:
         """Execute the full 4-stage build pipeline for a single image."""
         image_info.status = ImageBuildStatus.BUILDING
         image_info.started_at = datetime.now()
 
         try:
-            await self._run_with_retry(image_info, task, shared_build_dir)
+            await self._retry_with_backoff(
+                image_info, task,
+                lambda: self._execute_pipeline(image_info, task, shared_build_dir),
+                rate_limiter,
+            )
         except Exception as e:
             image_info.status = ImageBuildStatus.FAILED
             image_info.error_message = str(e)
@@ -158,14 +226,21 @@ class ImageBuilder:
             image_info.finished_at = datetime.now()
 
     async def retag_image(
-        self, image_info: ImageBuildInfo, task: BuildTask
+        self,
+        image_info: ImageBuildInfo,
+        task: BuildTask,
+        rate_limiter: RateLimitBackoff | None = None,
     ) -> None:
         """Execute the 3-stage retag pipeline: pull → tag → push."""
         image_info.status = ImageBuildStatus.BUILDING
         image_info.started_at = datetime.now()
 
         try:
-            await self._run_retag_with_retry(image_info, task)
+            await self._retry_with_backoff(
+                image_info, task,
+                lambda: self._execute_retag_pipeline(image_info),
+                rate_limiter,
+            )
         except Exception as e:
             image_info.status = ImageBuildStatus.FAILED
             image_info.error_message = str(e)
@@ -174,14 +249,21 @@ class ImageBuilder:
             image_info.finished_at = datetime.now()
 
     async def harbor_build_image(
-        self, image_info: ImageBuildInfo, task: BuildTask
+        self,
+        image_info: ImageBuildInfo,
+        task: BuildTask,
+        rate_limiter: RateLimitBackoff | None = None,
     ) -> None:
         """Execute the harbor two-stage pipeline: build original → inject envd → tag → push."""
         image_info.status = ImageBuildStatus.BUILDING
         image_info.started_at = datetime.now()
 
         try:
-            await self._run_harbor_with_retry(image_info, task)
+            await self._retry_with_backoff(
+                image_info, task,
+                lambda: self._execute_harbor_pipeline(image_info, task),
+                rate_limiter,
+            )
         except Exception as e:
             image_info.status = ImageBuildStatus.FAILED
             image_info.error_message = str(e)
@@ -190,14 +272,21 @@ class ImageBuilder:
             image_info.finished_at = datetime.now()
 
     async def script_build_image(
-        self, image_info: ImageBuildInfo, task: BuildTask
+        self,
+        image_info: ImageBuildInfo,
+        task: BuildTask,
+        rate_limiter: RateLimitBackoff | None = None,
     ) -> None:
         """Execute script build pipeline: render Dockerfile template → build → tag → push."""
         image_info.status = ImageBuildStatus.BUILDING
         image_info.started_at = datetime.now()
 
         try:
-            await self._run_script_with_retry(image_info, task)
+            await self._retry_with_backoff(
+                image_info, task,
+                lambda: self._execute_script_pipeline(image_info, task),
+                rate_limiter,
+            )
         except Exception as e:
             image_info.status = ImageBuildStatus.FAILED
             image_info.error_message = str(e)
@@ -205,142 +294,74 @@ class ImageBuilder:
         finally:
             image_info.finished_at = datetime.now()
 
-    async def _run_with_retry(
-        self, image_info: ImageBuildInfo, task: BuildTask, shared_build_dir: str
+    async def _retry_with_backoff(
+        self,
+        image_info: ImageBuildInfo,
+        task: BuildTask,
+        execute_fn,
+        rate_limiter: RateLimitBackoff | None = None,
     ) -> None:
+        """Unified retry logic with 429 rate-limit awareness.
+
+        Normal errors consume the retry budget (task.retry_count).
+        429 errors get a separate budget (RATE_LIMIT_MAX_RETRIES) and trigger
+        shared exponential backoff so all concurrent workers pause together.
+        """
         max_attempts = task.retry_count + 1  # retry_count=0 means 1 attempt
+        rate_limit_retries = 0
+        attempt = 0
 
-        for attempt in range(max_attempts):
-            if attempt > 0:
-                image_info.retry_attempts = attempt
-                # Reset stage statuses for retry
+        while True:
+            if rate_limiter:
+                await rate_limiter.wait_if_needed()
+
+            total_retries = attempt + rate_limit_retries
+            if total_retries > 0:
+                image_info.retry_attempts = total_retries
                 for stage in image_info.stages:
                     stage.status = StageStatus.PENDING
                     stage.started_at = None
                     stage.finished_at = None
                     stage.error_message = None
                 logger.info(
-                    f"Retry {attempt}/{task.retry_count} for {image_info.base_image}"
+                    f"Retry {total_retries} for {image_info.base_image}"
+                    + (f" (429 retries: {rate_limit_retries})" if rate_limit_retries else "")
                 )
 
             try:
-                await self._execute_pipeline(image_info, task, shared_build_dir)
+                await execute_fn()
+                if rate_limiter:
+                    rate_limiter.on_success()
                 image_info.status = ImageBuildStatus.SUCCESS
                 return
             except _StageError as e:
                 image_info.error_message = f"Stage [{e.stage.value}] failed: {e.message}"
-                if attempt < max_attempts - 1:
+
+                # 429 rate limit: separate retry budget with backoff
+                if _is_rate_limit_error(e.message) and rate_limit_retries < RATE_LIMIT_MAX_RETRIES:
+                    rate_limit_retries += 1
+                    if rate_limiter:
+                        await rate_limiter.on_rate_limited()
                     logger.warning(
-                        f"Attempt {attempt + 1} failed for {image_info.base_image}: {e.message}"
+                        f"Rate limited (429 retry {rate_limit_retries}/{RATE_LIMIT_MAX_RETRIES}) "
+                        f"for {image_info.base_image}"
                     )
                     continue
-                else:
-                    image_info.status = ImageBuildStatus.FAILED
-                    logger.error(
-                        f"All {max_attempts} attempts failed for {image_info.base_image}"
+
+                attempt += 1
+                if attempt < max_attempts:
+                    logger.warning(
+                        f"Attempt {attempt}/{max_attempts} failed for "
+                        f"{image_info.base_image}: {e.message}"
                     )
+                    continue
 
-    async def _run_retag_with_retry(
-        self, image_info: ImageBuildInfo, task: BuildTask
-    ) -> None:
-        max_attempts = task.retry_count + 1
-
-        for attempt in range(max_attempts):
-            if attempt > 0:
-                image_info.retry_attempts = attempt
-                for stage in image_info.stages:
-                    stage.status = StageStatus.PENDING
-                    stage.started_at = None
-                    stage.finished_at = None
-                    stage.error_message = None
-                logger.info(
-                    f"Retry {attempt}/{task.retry_count} for {image_info.base_image}"
+                image_info.status = ImageBuildStatus.FAILED
+                logger.error(
+                    f"All attempts exhausted for {image_info.base_image} "
+                    f"(normal: {attempt}, 429: {rate_limit_retries})"
                 )
-
-            try:
-                await self._execute_retag_pipeline(image_info)
-                image_info.status = ImageBuildStatus.SUCCESS
                 return
-            except _StageError as e:
-                image_info.error_message = f"Stage [{e.stage.value}] failed: {e.message}"
-                if attempt < max_attempts - 1:
-                    logger.warning(
-                        f"Attempt {attempt + 1} failed for {image_info.base_image}: {e.message}"
-                    )
-                    continue
-                else:
-                    image_info.status = ImageBuildStatus.FAILED
-                    logger.error(
-                        f"All {max_attempts} attempts failed for {image_info.base_image}"
-                    )
-
-    async def _run_harbor_with_retry(
-        self, image_info: ImageBuildInfo, task: BuildTask
-    ) -> None:
-        max_attempts = task.retry_count + 1
-
-        for attempt in range(max_attempts):
-            if attempt > 0:
-                image_info.retry_attempts = attempt
-                for stage in image_info.stages:
-                    stage.status = StageStatus.PENDING
-                    stage.started_at = None
-                    stage.finished_at = None
-                    stage.error_message = None
-                logger.info(
-                    f"Retry {attempt}/{task.retry_count} for {image_info.base_image}"
-                )
-
-            try:
-                await self._execute_harbor_pipeline(image_info, task)
-                image_info.status = ImageBuildStatus.SUCCESS
-                return
-            except _StageError as e:
-                image_info.error_message = f"Stage [{e.stage.value}] failed: {e.message}"
-                if attempt < max_attempts - 1:
-                    logger.warning(
-                        f"Attempt {attempt + 1} failed for {image_info.base_image}: {e.message}"
-                    )
-                    continue
-                else:
-                    image_info.status = ImageBuildStatus.FAILED
-                    logger.error(
-                        f"All {max_attempts} attempts failed for {image_info.base_image}"
-                    )
-
-    async def _run_script_with_retry(
-        self, image_info: ImageBuildInfo, task: BuildTask
-    ) -> None:
-        max_attempts = task.retry_count + 1
-
-        for attempt in range(max_attempts):
-            if attempt > 0:
-                image_info.retry_attempts = attempt
-                for stage in image_info.stages:
-                    stage.status = StageStatus.PENDING
-                    stage.started_at = None
-                    stage.finished_at = None
-                    stage.error_message = None
-                logger.info(
-                    f"Retry {attempt}/{task.retry_count} for {image_info.base_image}"
-                )
-
-            try:
-                await self._execute_script_pipeline(image_info, task)
-                image_info.status = ImageBuildStatus.SUCCESS
-                return
-            except _StageError as e:
-                image_info.error_message = f"Stage [{e.stage.value}] failed: {e.message}"
-                if attempt < max_attempts - 1:
-                    logger.warning(
-                        f"Attempt {attempt + 1} failed for {image_info.base_image}: {e.message}"
-                    )
-                    continue
-                else:
-                    image_info.status = ImageBuildStatus.FAILED
-                    logger.error(
-                        f"All {max_attempts} attempts failed for {image_info.base_image}"
-                    )
 
     async def _execute_pipeline(
         self, image_info: ImageBuildInfo, task: BuildTask, shared_build_dir: str

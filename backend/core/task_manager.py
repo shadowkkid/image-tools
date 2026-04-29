@@ -5,6 +5,7 @@ from datetime import datetime
 
 from backend.builder.image_builder import (
     ImageBuilder,
+    RateLimitBackoff,
     _compute_build_image_tag,
     _compute_script_target_image,
     _compute_target_image,
@@ -391,17 +392,19 @@ class TaskManager:
                     except Exception as e:
                         logger.debug(f"Periodic prune_build_cache failed: {e}")
 
+            rate_limiter = RateLimitBackoff()
+
             async def process_image(img: ImageBuildInfo):
                 try:
                     if task.build_mode == "retag":
-                        await self.image_builder.retag_image(img, task)
+                        await self.image_builder.retag_image(img, task, rate_limiter)
                     elif task.build_mode == "harbor":
-                        await self.image_builder.harbor_build_image(img, task)
+                        await self.image_builder.harbor_build_image(img, task, rate_limiter)
                     elif task.build_mode == "script":
-                        await self.image_builder.script_build_image(img, task)
+                        await self.image_builder.script_build_image(img, task, rate_limiter)
                     else:
                         await self.image_builder.build_image(
-                            img, task, shared_build_dir
+                            img, task, shared_build_dir, rate_limiter
                         )
                 except Exception as e:
                     logger.error(
