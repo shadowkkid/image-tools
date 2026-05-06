@@ -14,7 +14,7 @@ import {
   message,
 } from 'antd';
 import { ArrowLeftOutlined, ReloadOutlined, StopOutlined, CopyOutlined, RedoOutlined } from '@ant-design/icons';
-import { getTask, stopTask, exportFailedImages } from '../api/client';
+import { getTask, stopTask, exportFailedImages, exportSuccessImages } from '../api/client';
 import type { TaskDetailData, ImageDetail, StageDetail } from '../types';
 
 const statusColorMap: Record<string, string> = {
@@ -225,36 +225,38 @@ export default function TaskDetail() {
     </div>
   );
 
-  const handleCopySuccessImages = () => {
-    const successImages = task.images
-      .filter((img) => img.status === 'success')
-      .map((img) => `${img.target_image}\t${img.template_name}`)
-      .join('\n');
-    if (!successImages) {
-      message.warning('没有构建成功的镜像');
-      return;
-    }
-    const count = task.images.filter((img) => img.status === 'success').length;
-    if (navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(successImages).then(
-        () => message.success(`已复制 ${count} 条记录`),
-        () => message.error('复制失败'),
-      );
-    } else {
-      // Fallback for non-secure contexts (HTTP)
-      const textarea = document.createElement('textarea');
-      textarea.value = successImages;
-      textarea.style.position = 'fixed';
-      textarea.style.opacity = '0';
-      document.body.appendChild(textarea);
-      textarea.select();
-      try {
-        document.execCommand('copy');
-        message.success(`已复制 ${count} 条记录`);
-      } catch {
-        message.error('复制失败');
+  const handleCopySuccessImages = async () => {
+    try {
+      const res = await exportSuccessImages(task.task_id);
+      if (!res.images.length) {
+        message.warning('没有构建成功的镜像');
+        return;
       }
-      document.body.removeChild(textarea);
+      const text = res.images
+        .map((img) => `${img.target_image}\t${img.template_name}`)
+        .join('\n');
+      if (navigator.clipboard?.writeText) {
+        navigator.clipboard.writeText(text).then(
+          () => message.success(`已复制 ${res.total} 条记录`),
+          () => message.error('复制失败'),
+        );
+      } else {
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        try {
+          document.execCommand('copy');
+          message.success(`已复制 ${res.total} 条记录`);
+        } catch {
+          message.error('复制失败');
+        }
+        document.body.removeChild(textarea);
+      }
+    } catch {
+      message.error('获取成功镜像列表失败');
     }
   };
 

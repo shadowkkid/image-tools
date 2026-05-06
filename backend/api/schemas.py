@@ -179,6 +179,16 @@ class ExportFailedImagesResponse(BaseModel):
     tag_suffix: str = ""
 
 
+class SuccessImageItem(BaseModel):
+    target_image: str
+    template_name: str = ""
+
+
+class ExportSuccessImagesResponse(BaseModel):
+    total: int
+    images: list[SuccessImageItem]
+
+
 # ---- Harbor Dataset ----
 
 class ParseDatasetRequest(BaseModel):

@@ -8,6 +8,7 @@ import type {
   DatasetSummary,
   DatasetImageItem,
   ExportFailedImagesResponse,
+  ExportSuccessImagesResponse,
   HarborTaskPreview,
 } from '../types';
 
@@ -104,6 +105,11 @@ export async function deleteTask(taskId: string): Promise<{ success: boolean; me
 
 export async function exportFailedImages(taskId: string): Promise<ExportFailedImagesResponse> {
   const { data } = await api.get(`/tasks/${taskId}/failed-images`);
+  return data;
+}
+
+export async function exportSuccessImages(taskId: string): Promise<ExportSuccessImagesResponse> {
+  const { data } = await api.get(`/tasks/${taskId}/success-images`);
   return data;
 }
 

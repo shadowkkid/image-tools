@@ -3,8 +3,10 @@ from fastapi import APIRouter, HTTPException, Query
 from backend.api.schemas import (
     CreateTaskRequest,
     ExportFailedImagesResponse,
+    ExportSuccessImagesResponse,
     ImageDetail,
     StageDetail,
+    SuccessImageItem,
     TaskDetail,
     TaskListResponse,
     TaskSummary,
@@ -141,6 +143,21 @@ async def export_failed_images(task_id: str):
         tag_mode=task.tag_mode,
         tag_suffix=task.tag_suffix,
     )
+
+
+@router.get("/{task_id}/success-images", response_model=ExportSuccessImagesResponse)
+async def export_success_images(task_id: str):
+    task = task_manager.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    success_images = [
+        SuccessImageItem(target_image=img.target_image, template_name=img.template_name)
+        for img in task.images
+        if img.status == ImageBuildStatus.SUCCESS
+    ]
+
+    return ExportSuccessImagesResponse(total=len(success_images), images=success_images)
 
 
 def _to_summary(task) -> TaskSummary:

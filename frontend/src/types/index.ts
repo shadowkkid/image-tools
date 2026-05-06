@@ -111,6 +111,11 @@ export interface ExportFailedImagesResponse {
   tag_suffix: string;
 }
 
+export interface ExportSuccessImagesResponse {
+  total: number;
+  images: { target_image: string; template_name: string }[];
+}
+
 export interface HarborTaskPreview {
   task_name: string;
   base_image: string;
