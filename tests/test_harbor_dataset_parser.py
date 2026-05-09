@@ -107,17 +107,18 @@ class TestParseHarborDataset:
         assert len(tasks) == 1
         assert tasks[0].base_image == "alpine:3.18"
 
-    def test_docker_image_takes_priority_over_dockerfile(self, tmp_path):
+    def test_dockerfile_takes_priority_over_docker_image(self, tmp_path):
         self._make_task_dir(
             tmp_path,
             "both",
             '[environment]\ndocker_image = "prebuilt:v1"\n',
-            "FROM ignored:latest\n",
+            "FROM actual-base:latest\n",
         )
         tasks = parse_harbor_dataset(str(tmp_path))
         assert len(tasks) == 1
-        assert tasks[0].base_image == "prebuilt:v1"
-        assert tasks[0].dockerfile_path == ""
+        assert tasks[0].base_image == "actual-base:latest"
+        assert tasks[0].dockerfile_path != ""
+        assert tasks[0].docker_image == ""
 
 
 class TestComputeTemplateName:

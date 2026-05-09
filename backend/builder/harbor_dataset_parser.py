@@ -70,17 +70,19 @@ def parse_harbor_dataset(dataset_path: str) -> list[HarborTaskInfo]:
             logger.warning("Failed to parse %s: %s", task_toml, e)
             continue
 
-        if docker_image:
+        # Prefer environment/Dockerfile for building (docker_image is the
+        # prebuilt runtime image on harbor, not necessarily accessible).
+        df = entry / "environment" / "Dockerfile"
+        if df.exists():
+            dockerfile_path = str(df)
+            base_image = _extract_from_line(df)
+            # Clear docker_image so pipeline uses Dockerfile build, not pull
+            docker_image = ""
+        elif docker_image:
             base_image = docker_image
         else:
-            # Fallback: parse environment/Dockerfile for FROM line
-            df = entry / "environment" / "Dockerfile"
-            if df.exists():
-                dockerfile_path = str(df)
-                base_image = _extract_from_line(df)
-            else:
-                logger.warning("Skipping %s: no docker_image and no Dockerfile", entry.name)
-                continue
+            logger.warning("Skipping %s: no Dockerfile and no docker_image", entry.name)
+            continue
 
         if not base_image:
             logger.warning("Skipping %s: could not resolve base image", entry.name)
